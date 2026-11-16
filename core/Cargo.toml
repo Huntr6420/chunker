@@ -1,0 +1,15 @@
+[package]
+name = "chunker-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+
+[dependencies]
+blake3 = "1.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+fs4 = "0.12"
+
+[dev-dependencies]
+tempfile = "3"
