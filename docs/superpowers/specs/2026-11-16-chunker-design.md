@@ -117,7 +117,9 @@ pub fn is_cancelled(token: Option<&Arc<AtomicBool>>) -> bool;
 #[doc(hidden)] pub fn read_retrying_unstable<R: std::io::Read + ?Sized>(reader: &mut R, buffer: &mut [u8]) -> std::io::Result<usize>;
 ```
 
-`SplitSummary.reused_chunks` counts validated existing chunks reused. The `#[doc(hidden)] pub` non-stable integration-test seam `split_with_reader_unstable` accepts a generic `Read + Seek`, expected size, chunk and buffer sizes, output, cancellation and progress context. The shared reader retries `Interrupted`. Invalid public split arguments produce `ChunkerError::InvalidArgument(String)`.
+`SplitSummary.reused_chunks` counts validated existing chunks reused. The `#[doc(hidden)] pub` non-stable integration-test seam `split_with_reader_unstable` accepts a generic `Read + Seek`, original filename, expected size, chunk and buffer sizes, output, cancellation and progress context. It validates the original filename using the plain-filename check before using it. The shared reader retries `Interrupted`. Invalid public split arguments produce `ChunkerError::InvalidArgument(String)`.
+
+Integration tests use `core/tests/common/mod.rs` with `#![allow(dead_code)]` as a deliberate allowance for shared helpers unused by individual integration-test crates. Cancellation triggered from a progress callback must leave completed chunks intact, remove active `.tmp` files, and leave no manifest. Re-splitting removes a stale manifest before processing. A merge to an explicit output path with a nonexistent parent returns a clear error and creates no leftover files.
 
 ## 4. Detailed Component Design
 

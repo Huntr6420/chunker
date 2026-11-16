@@ -39,15 +39,17 @@ Files: `core/src/stream.rs`, `core/src/lib.rs`, `core/tests/common/mod.rs`, `cor
 
 - [ ] Test interrupted reads and propagation of other errors. Implement `#[doc(hidden)] pub fn read_retrying_unstable<R: std::io::Read + ?Sized>(reader: &mut R, buffer: &mut [u8]) -> std::io::Result<usize>` as a non-stable integration-test interface.
 - [ ] Implement and test `is_cancelled` for absent, clear and set flags. Provide and test deterministic seeded data and a temp-directory helper using `tempfile`; retain guards. Run gate and stop for review.
+- [ ] Put `#![allow(dead_code)]` in `core/tests/common/mod.rs`: this deliberately permits false-positive unused-helper warnings because each integration test compiles the shared module separately.
 
 ## Task 4b: Streaming split
 
 Files: `core/src/split.rs`, `lib.rs`, `core/tests/split_basic_test.rs`.
 
 - [ ] Test zero-byte input, exact and partial chunks, non-periodic input crossing 1 MiB buffer boundaries, public minimum rejection and both hashes.
-- [ ] Expose `#[doc(hidden)] pub` non-stable `split_with_reader_unstable`, generic over `Read + Seek`, accepting expected size, chunk size and buffer size plus output, cancellation and progress context. Integration tests use it with `common/`.
+- [ ] Expose `#[doc(hidden)] pub` non-stable `split_with_reader_unstable`, generic over `Read + Seek`, accepting the original filename, expected size, chunk size and buffer size plus output, cancellation and progress context. Validate the original filename using the plain-filename check, including a test rejecting an unsafe name. Integration tests use it with `common/`.
 - [ ] Boundary sweep: buffer size 8, chunk sizes 7, 8, 9; source lengths 0, 1, chunk size minus 1, chunk size, chunk size plus 1, twice chunk size, and twice chunk size plus 1. Verify all bytes, sizes, chunk and master hashes, chunk count and final progress index. Use independent temporary directories.
 - [ ] Use a deterministic growing reader to verify growth error, no final manifest and temporary cleanup. Cover early EOF and interrupted reads.
+- [ ] Trigger cancellation by setting the token from a progress callback after at least one chunk is finalized; assert cancellation, no manifest, completed chunks retained and no `.tmp` files.
 - [ ] Implement fixed-buffer splitting, retrying reads, cancellation, checked counts, `div_ceil`, `u64::min` before `usize` casts, atomic guarded writes and progress. Return `SplitSummary { bundle_path, reused_chunks: 0 }`; invalid public chunk size returns `InvalidArgument`. Run gate and stop for review.
 
 ## Task 5: Checkpointed resume
@@ -55,6 +57,7 @@ Files: `core/src/split.rs`, `lib.rs`, `core/tests/split_basic_test.rs`.
 Files: `core/src/split.rs`, `core/tests/split_resume_test.rs`.
 
 - [ ] Test same-size corrupted middle chunk, missing/truncated chunks, all chunks valid without a manifest, cancellation during resume, changed source and changed chunk size. Assert restored content and accurate `reused_chunks`; valid earlier chunks are reused and invalid later chunks rebuilt.
+- [ ] Test re-splitting with a stale `manifest.json`: observe that it is removed during processing before a replacement can be published; cancel and assert the stale manifest remains absent.
 - [ ] Re-read source from byte zero; checkpoint the master hasher and position before each candidate, restore on mismatch, clean orphan chunks from the first invalid index and check disk space after resume validation. Run gate and stop for review.
 
 ## Task 6: Verify
@@ -70,6 +73,7 @@ Files: `core/src/merge.rs`, `lib.rs`, `core/tests/merge_test.rs`.
 
 - [ ] Test round trip, zero-byte input, existing output with and without force, corruption, cancellation, cleanup and preservation of an existing destination on failure.
 - [ ] Test an existing output directory resolves to that directory plus original filename; verify returned path and bytes. Test an explicit output file resolves exactly to that path, verifies returned path and bytes, and enforces overwrite protection.
+- [ ] Test an explicit `-o` file path whose parent directory does not exist; expect a clear error and assert no output, temporary file or newly created parent directory is left behind.
 - [ ] Validate, check space, stream and hash into guarded `.tmp`, sync and close. Without force re-check existence immediately before `fs::rename`; with force use rename and propagate errors. Document the remaining race. Run gate and stop for review.
 
 ## Task 8: CLI
