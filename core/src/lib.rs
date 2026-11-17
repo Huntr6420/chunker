@@ -8,6 +8,7 @@ pub mod guard;
 pub mod manifest;
 pub mod progress;
 pub mod security;
+pub mod stream;
 
 pub use error::ChunkerError;
 pub use fs_utils::{check_free_space, clean_orphan_chunks, clean_stale_tmp_files};
