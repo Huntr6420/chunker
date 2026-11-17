@@ -76,7 +76,9 @@ the Tauri GUI, encryption.
 
 ## Required tests
 The implementation plan assigns required tests to tasks and to `core/tests/`
-and `cli/tests/` (with internal unit tests for private seams). Cover round trip, 0-byte file, buffer-straddling
+and `cli/tests/`; tests reach the hidden seams from `core/tests/`. The shared
+`core/tests/common/mod.rs` uses `#![allow(dead_code)]` deliberately because each
+integration test compiles the shared helpers separately. Cover round trip, 0-byte file, buffer-straddling
 boundary, resume with rollback, manifest validation, path sanitization,
 overwrite protection, corruption detection, verify master hash, cancel cleanup,
 stale/orphan cleanup, file growth error, safe parent path. Also cover:
