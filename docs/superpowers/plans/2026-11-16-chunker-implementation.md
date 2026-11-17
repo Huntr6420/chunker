@@ -43,14 +43,47 @@ Files: `core/src/stream.rs`, `core/src/lib.rs`, `core/tests/common/mod.rs`, `cor
 
 ## Task 4b: Streaming split
 
-Files: `core/src/split.rs`, `lib.rs`, `core/tests/split_basic_test.rs`.
+Files: `core/src/split.rs`, `core/src/lib.rs`, `core/tests/split_basic_test.rs`, `core/tests/common/mod.rs`.
 
-- [ ] Test zero-byte input, exact and partial chunks, non-periodic input crossing 1 MiB buffer boundaries, public minimum rejection and both hashes.
-- [ ] Expose `#[doc(hidden)] pub` non-stable `split_with_reader_unstable`, generic over `Read + Seek`, accepting the original filename, expected size, chunk size and buffer size plus output, cancellation and progress context. Validate the original filename using the plain-filename check, including a test rejecting an unsafe name. Integration tests use it with `common/`.
-- [ ] Boundary sweep: buffer size 8, chunk sizes 7, 8, 9; source lengths 0, 1, chunk size minus 1, chunk size, chunk size plus 1, twice chunk size, and twice chunk size plus 1. Verify all bytes, sizes, chunk and master hashes, chunk count and final progress index. Use independent temporary directories.
-- [ ] Use a deterministic growing reader to verify growth error, no final manifest and temporary cleanup. Cover early EOF and interrupted reads.
-- [ ] Trigger cancellation by setting the token from a progress callback after at least one chunk is finalized; assert cancellation, no manifest, completed chunks retained and no `.tmp` files.
-- [ ] Implement fixed-buffer splitting, retrying reads, cancellation, checked counts, `div_ceil`, `u64::min` before `usize` casts, atomic guarded writes and progress. Return `SplitSummary { bundle_path, reused_chunks: 0 }`; invalid public chunk size returns `InvalidArgument`. Run gate and stop for review.
+### Decisions and interfaces
+
+Task 4b performs a fresh split. `reused_chunks` is always 0; no checkpointing or reuse belongs here. Split creates `output_dir` and `<output_dir>/<name>.chunks` using `create_dir_all`; merge still never creates parents.
+
+The exact non-stable seam signature is in the spec's Public API: `reader: &mut R` (`Read + Seek`), `original_filename: &str`, `expected_size: u64`, `chunk_size: u64`, `buffer_size: usize`, `output_dir: &Path`, cancellation token, then progress callback. Keep `Seek` even though Task 4b does not seek. Validate the filename with `validate_plain_filename`. Reject zero chunk or buffer sizes with `InvalidArgument`. Only the public wrapper enforces `MIN_CHUNK_SIZE`.
+
+`split_file` validates public chunk size, extracts the input filename, opens the source, gets its size and delegates with `BUFFER_SIZE`. Missing input returns `Io`. Both paths return `SplitSummary`.
+
+The Public API and this plan take precedence over spec 4.6's illustrative samples: return `SplitSummary`, use `read_retrying_unstable`, and check cancellation before reads rather than copying the sample's read-first ordering.
+
+### Startup, streaming and finalization
+
+- Validate arguments and check cancellation at entry, including the zero-byte path. Create output and bundle directories. Remove old `manifest.json`, propagating removal errors except `NotFound`, then call `clean_stale_tmp_files`.
+- Before writing any chunk, call `check_free_space(&bundle_dir, expected_size, 0, 1024 * 1024)`; overhead is 1 MiB. Task 5 later moves this check after resume validation.
+- Zero-byte input takes an explicit early path: no chunk files, no progress events, total_chunks 0 and the empty BLAKE3 hash. It still uses the cancellation and finalization checks below; do not evaluate `total_chunks - 1`.
+- Calculate chunk count with `expected_size.div_ceil(chunk_size)` and checked `usize::try_from`. Create each chunk temporary file lazily only when bytes remain; an exact multiple never creates an empty extra chunk. Apply `u64::min` before casting a slice length to `usize`.
+- Reset the chunk hasher only when opening a new temporary chunk. Feed both hashers exactly the slice written; every byte enters the master hasher once. Declare the guard before the writer, sync and close before rename, and disarm only after rename succeeds.
+- Detect growth with checked byte arithmetic before hashing or writing the crossing read; return `Io(InvalidData)`. A short source returns `Io(UnexpectedEof)`. Both errors leave no manifest or active `.tmp`; completed chunks remain.
+- Check `is_cancelled` at the top of every read-loop iteration and separately immediately before orphan cleanup and immediately before manifest save. Cancellation observed there returns `Cancelled`, keeping completed chunks but no manifest or active temporary file. This includes cancellation requested by the final progress callback.
+- Once the byte length and chunk count are verified, call `clean_orphan_chunks(&bundle_dir, total_chunks)` before saving the manifest, so smaller re-splits remove surplus old chunks. Task 5 instead cleans from the first invalid index before writing.
+- The final cancellation check is immediately before `save_manifest_atomic`. That save has no cancellation parameter: a flag arriving during the save is not guaranteed to stop publication. Once save returns `Ok`, return success without another cancellation check. Flags set after return cannot undo completion.
+
+### Tests and implementation passes
+
+Build in two passes; tests precede implementation in each pass. First implement happy paths and the boundary sweep; then add growth, early EOF, interrupted reads and cancellation cases. Do not invent failures for already-working behavior; report actual expected failures accurately.
+
+- [ ] Test public sub-minimum chunk size -> `InvalidArgument`, missing input -> `Io`, seam zero buffer/chunk sizes -> `InvalidArgument`, and unsafe seam filename -> `InvalidFilename`.
+- [ ] Test split creates a missing nested output directory and the bundle. Test startup removes stale manifest and recognized temporary files while preserving unrelated files; removal errors other than `NotFound` must propagate.
+- [ ] Test zero-byte success: zero chunks, empty hash, no events, valid manifest, no temporary files. Test an already-set token on zero-byte input: `Cancelled` and no manifest written.
+- [ ] Boundary sweep: buffer 8; chunks 7, 8, 9; lengths 0, 1, chunk-1, chunk, chunk+1, 2*chunk, 2*chunk+1. Use a separate tempdir per case. Independently derive expectations from source bytes, without implementation helpers; verify concatenated bytes, each size/hash, master hash, count, `validate_manifest`, no `.tmp`, and final progress (or no events for empty input).
+- [ ] Test a read spanning several chunks with a buffer larger than multiple chunk sizes. Test exact multiples produce a full final chunk and no empty extra chunk.
+- [ ] Test progress at exact boundaries reports the chunk just finished, never index `total_chunks`; byte counters never decrease and finish at total bytes with index `total_chunks - 1`.
+- [ ] Real-buffer case: chunk size 1,048,577, 1 MiB buffer, seeded non-periodic source longer than two chunks. Verify full output and both hash levels.
+- [ ] Re-split a larger then smaller source under the same name/output: second content and manifest match the new source, no orphan chunks remain, and `reused_chunks == 0`.
+- [ ] Add interrupting/growing/shrinking reader wrappers implementing `Read + Seek` in `common/mod.rs`. Simulate growth with data exceeding expected size; arrange completed chunks before the crossing read and prove that read was not written. Test early EOF, interrupted-read retries, no manifest, no `.tmp`, completed chunks retained.
+- [ ] Cancellation A: callback sets token after a chunk finishes with more data to read; expect `Cancelled`, completed chunks retained, no manifest or `.tmp`.
+- [ ] Cancellation B: callback sets token on the final progress event; expect `Cancelled`, all completed chunks retained, no manifest or `.tmp`.
+- [ ] Cancellation C: set token only after `split_file` returns `Ok`; result and saved bundle remain successful and unchanged.
+- [ ] Run targeted tests and the full quality gate; stop for review without committing.
 
 ## Task 5: Checkpointed resume
 

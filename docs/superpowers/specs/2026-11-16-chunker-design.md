@@ -109,6 +109,17 @@ pub struct ProgressEvent { pub operation: OperationKind, pub current_chunk: usiz
 #[derive(Debug, Clone)]
 pub struct SplitSummary { pub bundle_path: PathBuf, pub reused_chunks: usize }
 pub fn split_file<F>(input_path: &Path, output_dir: &Path, chunk_size: u64, cancel_token: Option<&Arc<AtomicBool>>, on_progress: F) -> Result<SplitSummary, ChunkerError> where F: FnMut(ProgressEvent);
+#[doc(hidden)]
+pub fn split_with_reader_unstable<R: std::io::Read + std::io::Seek, F>(
+    reader: &mut R,
+    original_filename: &str,
+    expected_size: u64,
+    chunk_size: u64,
+    buffer_size: usize,
+    output_dir: &Path,
+    cancel_token: Option<&Arc<AtomicBool>>,
+    on_progress: F,
+) -> Result<SplitSummary, ChunkerError> where F: FnMut(ProgressEvent);
 pub fn verify_bundle<F>(bundle: &Path, cancel_token: Option<&Arc<AtomicBool>>, on_progress: F) -> Result<(), ChunkerError> where F: FnMut(ProgressEvent);
 pub fn merge_bundle<F>(bundle: &Path, output: Option<&Path>, force: bool, cancel_token: Option<&Arc<AtomicBool>>, on_progress: F) -> Result<PathBuf, ChunkerError> where F: FnMut(ProgressEvent);
 pub struct TmpFileGuard { /* private state */ }
