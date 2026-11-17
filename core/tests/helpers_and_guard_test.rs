@@ -342,6 +342,29 @@ fn test_extract_filename() {
 }
 
 #[test]
+fn test_reserved_name_with_multiple_dots() {
+    for name in ["com1.tar.gz", "CON.tar.gz", "nul.backup.txt"] {
+        assert!(validate_plain_filename(name).is_err(), "{name}");
+    }
+    for name in ["com10.tar.gz", "console.log"] {
+        assert!(validate_plain_filename(name).is_ok(), "{name}");
+    }
+}
+
+#[test]
+fn test_extract_filename_edge_paths() {
+    for (path, expected) in [
+        (r"C:\Windows\System32\calc.exe", "calc.exe"),
+        (r"a\b\file.tar", "file.tar"),
+        ("dir/sub/file.tar.gz", "file.tar.gz"),
+        ("trailing/slash/", "slash"),
+        ("../../etc/passwd", "passwd"),
+    ] {
+        assert_eq!(extract_filename(Path::new(path)).unwrap(), expected);
+    }
+}
+
+#[test]
 fn test_clean_stale_tmp_files() {
     let dir = tempdir().unwrap();
     let bundle = dir.path();

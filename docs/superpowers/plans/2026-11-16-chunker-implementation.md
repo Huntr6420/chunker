@@ -38,8 +38,8 @@ Files: `core/src/manifest.rs`, `lib.rs`, `core/tests/manifest_test.rs`.
 Files: `core/src/stream.rs`, `core/src/lib.rs`, `core/tests/common/mod.rs`, `core/tests/stream_test.rs`.
 
 - [ ] Test interrupted reads and propagation of other errors. Implement `#[doc(hidden)] pub fn read_retrying_unstable<R: std::io::Read + ?Sized>(reader: &mut R, buffer: &mut [u8]) -> std::io::Result<usize>` as a non-stable integration-test interface.
-- [ ] Implement and test `is_cancelled` for absent, clear and set flags. Provide and test deterministic seeded data and a temp-directory helper using `tempfile`; retain guards. Run gate and stop for review.
 - [ ] Put `#![allow(dead_code)]` in `core/tests/common/mod.rs`: this deliberately permits false-positive unused-helper warnings because each integration test compiles the shared module separately.
+- [ ] Implement and test `is_cancelled` for absent, clear and set flags. Provide and test deterministic seeded data and a temp-directory helper using `tempfile`; retain guards. Run gate and stop for review.
 
 ## Task 4b: Streaming split
 
@@ -57,7 +57,7 @@ Files: `core/src/split.rs`, `lib.rs`, `core/tests/split_basic_test.rs`.
 Files: `core/src/split.rs`, `core/tests/split_resume_test.rs`.
 
 - [ ] Test same-size corrupted middle chunk, missing/truncated chunks, all chunks valid without a manifest, cancellation during resume, changed source and changed chunk size. Assert restored content and accurate `reused_chunks`; valid earlier chunks are reused and invalid later chunks rebuilt.
-- [ ] Test re-splitting with a stale `manifest.json`: observe that it is removed during processing before a replacement can be published; cancel and assert the stale manifest remains absent.
+- [ ] Place a stale `manifest.json`, start a re-split, cancel partway, and assert `manifest.json` does not exist.
 - [ ] Re-read source from byte zero; checkpoint the master hasher and position before each candidate, restore on mismatch, clean orphan chunks from the first invalid index and check disk space after resume validation. Run gate and stop for review.
 
 ## Task 6: Verify

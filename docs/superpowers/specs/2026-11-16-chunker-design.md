@@ -112,7 +112,7 @@ pub fn split_file<F>(input_path: &Path, output_dir: &Path, chunk_size: u64, canc
 pub fn verify_bundle<F>(bundle: &Path, cancel_token: Option<&Arc<AtomicBool>>, on_progress: F) -> Result<(), ChunkerError> where F: FnMut(ProgressEvent);
 pub fn merge_bundle<F>(bundle: &Path, output: Option<&Path>, force: bool, cancel_token: Option<&Arc<AtomicBool>>, on_progress: F) -> Result<PathBuf, ChunkerError> where F: FnMut(ProgressEvent);
 pub struct TmpFileGuard { /* private state */ }
-impl TmpFileGuard { pub fn new(path: PathBuf) -> Self; pub fn empty() -> Self; pub fn reset(&mut self, path: PathBuf); pub fn disarm(&mut self); }
+impl TmpFileGuard { pub fn new(path: PathBuf) -> Self; pub fn empty() -> Self; pub fn reset(&mut self, path: PathBuf); pub fn disarm(&mut self); pub fn path(&self) -> Option<&Path>; }
 pub fn is_cancelled(token: Option<&Arc<AtomicBool>>) -> bool;
 #[doc(hidden)] pub fn read_retrying_unstable<R: std::io::Read + ?Sized>(reader: &mut R, buffer: &mut [u8]) -> std::io::Result<usize>;
 ```
@@ -408,8 +408,10 @@ Code samples in this section are illustrative; the Public API and implementation
 ```rust
 // 1. Delete old manifest.json and clean stale tmp files
 let old_manifest = bundle_dir.join("manifest.json");
-if old_manifest.exists() {
-    let _ = std::fs::remove_file(old_manifest);
+match std::fs::remove_file(old_manifest) {
+    Ok(()) => {},
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+    Err(e) => return Err(ChunkerError::Io(e)),
 }
 clean_stale_tmp_files(&bundle_dir)?;
 
@@ -639,7 +641,7 @@ Ok(bundle_dir)
 
 #### `merge_bundle`
 1. Load & validate manifest.
-2. Resolve destination path (`safe_parent`, sanitize original filename).
+2. Resolve destination path (`safe_parent`, use the validated filename).
 3. Check destination existence: if exists and `!force`, return `Err(DestinationAlreadyExists)`.
 4. Check free space on destination parent directory.
 5. For a 0-byte file validate its empty master hash, then create a guarded empty temporary file and use the same finalization path.
