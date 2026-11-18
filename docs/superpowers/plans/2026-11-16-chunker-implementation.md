@@ -63,9 +63,10 @@ The Public API and this plan take precedence over spec 4.6's illustrative sample
 - Calculate chunk count with `expected_size.div_ceil(chunk_size)` and checked `usize::try_from`. Create each chunk temporary file lazily only when bytes remain; an exact multiple never creates an empty extra chunk. Apply `u64::min` before casting a slice length to `usize`.
 - Reset the chunk hasher only when opening a new temporary chunk. Feed both hashers exactly the slice written; every byte enters the master hasher once. Declare the guard before the writer, sync and close before rename, and disarm only after rename succeeds.
 - Detect growth with checked byte arithmetic before hashing or writing the crossing read; return `Io(InvalidData)`. A short source returns `Io(UnexpectedEof)`. Both errors leave no manifest or active `.tmp`; completed chunks remain.
-- Check `is_cancelled` at the top of every read-loop iteration and separately immediately before orphan cleanup and immediately before manifest save. Cancellation observed there returns `Cancelled`, keeping completed chunks but no manifest or active temporary file. This includes cancellation requested by the final progress callback.
+- After consuming the expected bytes and checking for early EOF, probe once with `read_retrying_unstable` into a one-byte buffer. The zero-byte path makes the same probe. A nonzero result returns the same `Io(InvalidData)` error with `Input file grew during split`. Propagate other read errors. This catches extra data when the read loop reaches `expected_size` exactly and stops without seeing the extra bytes.
+- Check `is_cancelled` at entry, at the top of every read-loop iteration, immediately before `clean_orphan_chunks`, and immediately before `save_manifest_atomic`. The zero-byte path has three checkpoints: entry, before cleanup, and before save. A growth or I/O error found before cancellation is observed takes precedence over `Cancelled`. Observed cancellation keeps completed chunks, publishes no new manifest and leaves no active `.tmp`. This includes cancellation from the final progress callback when the probe succeeds.
 - Once the byte length and chunk count are verified, call `clean_orphan_chunks(&bundle_dir, total_chunks)` before saving the manifest, so smaller re-splits remove surplus old chunks. Task 5 instead cleans from the first invalid index before writing.
-- The final cancellation check is immediately before `save_manifest_atomic`. That save has no cancellation parameter: a flag arriving during the save is not guaranteed to stop publication. Once save returns `Ok`, return success without another cancellation check. Flags set after return cannot undo completion.
+- Build the manifest value before the final cancellation check, then call `save_manifest_atomic` immediately after that check. That save has no cancellation parameter: a flag arriving during the save is not guaranteed to stop publication. Once save returns `Ok`, return success without another cancellation check. Flags set after return cannot undo completion.
 
 ### Tests and implementation passes
 
@@ -75,14 +76,17 @@ Build in two passes; tests precede implementation in each pass. First implement 
 - [ ] Test split creates a missing nested output directory and the bundle. Test startup removes stale manifest and recognized temporary files while preserving unrelated files; removal errors other than `NotFound` must propagate.
 - [ ] Test zero-byte success: zero chunks, empty hash, no events, valid manifest, no temporary files. Test an already-set token on zero-byte input: `Cancelled` and no manifest written.
 - [ ] Boundary sweep: buffer 8; chunks 7, 8, 9; lengths 0, 1, chunk-1, chunk, chunk+1, 2*chunk, 2*chunk+1. Use a separate tempdir per case. Independently derive expectations from source bytes, without implementation helpers; verify concatenated bytes, each size/hash, master hash, count, `validate_manifest`, no `.tmp`, and final progress (or no events for empty input).
-- [ ] Test a read spanning several chunks with a buffer larger than multiple chunk sizes. Test exact multiples produce a full final chunk and no empty extra chunk.
+- [ ] Test a read spanning several chunks with a buffer larger than multiple chunk sizes. Assert that the progress event reports the chunk containing the last byte of the read and the correct cumulative byte count. Test exact multiples produce a full final chunk and no empty extra chunk.
 - [ ] Test progress at exact boundaries reports the chunk just finished, never index `total_chunks`; byte counters never decrease and finish at total bytes with index `total_chunks - 1`.
 - [ ] Real-buffer case: chunk size 1,048,577, 1 MiB buffer, seeded non-periodic source longer than two chunks. Verify full output and both hash levels.
 - [ ] Re-split a larger then smaller source under the same name/output: second content and manifest match the new source, no orphan chunks remain, and `reused_chunks == 0`.
 - [ ] Add interrupting/growing/shrinking reader wrappers implementing `Read + Seek` in `common/mod.rs`. Simulate growth with data exceeding expected size; arrange completed chunks before the crossing read and prove that read was not written. Test early EOF, interrupted-read retries, no manifest, no `.tmp`, completed chunks retained.
+- [ ] Test buffer-aligned growth (expected 16 bytes, buffer 8 bytes, source 24 bytes) and an expected size of zero with a non-empty source. Both must report `Io(InvalidData)` with the growth message and publish no manifest. A source whose length exactly matches `expected_size` must succeed.
 - [ ] Cancellation A: callback sets token after a chunk finishes with more data to read; expect `Cancelled`, completed chunks retained, no manifest or `.tmp`.
 - [ ] Cancellation B: callback sets token on the final progress event; expect `Cancelled`, all completed chunks retained, no manifest or `.tmp`.
+- [ ] Pre-create a surplus chunk and cancel from the final progress callback. Assert `Cancelled`, the surplus chunk is retained, and no manifest or `.tmp` remains.
 - [ ] Cancellation C: set token only after `split_file` returns `Ok`; result and saved bundle remain successful and unchanged.
+- [ ] Cover all four cancellation checkpoints in the normal path and all three in the zero-byte path. Each checkpoint needs at least one test that fails if only that check is removed. To isolate the zero-byte pre-cleanup check, pre-create a surplus chunk and use a reader whose `read()` sets the token during the probe and returns `Ok(0)`. Assert `Cancelled`, the surplus chunk is retained, and no manifest or `.tmp` remains.
 - [ ] Run targeted tests and the full quality gate; stop for review without committing.
 
 ## Task 5: Checkpointed resume
@@ -91,6 +95,7 @@ Files: `core/src/split.rs`, `core/tests/split_resume_test.rs`.
 
 - [ ] Test same-size corrupted middle chunk, missing/truncated chunks, all chunks valid without a manifest, cancellation during resume, changed source and changed chunk size. Assert restored content and accurate `reused_chunks`; valid earlier chunks are reused and invalid later chunks rebuilt.
 - [ ] Place a stale `manifest.json`, start a re-split, cancel partway, and assert `manifest.json` does not exist.
+- [ ] When reworking cleanup, make `clean_orphan_chunks` and `clean_stale_tmp_files` propagate `remove_file` errors other than `NotFound`. Test both helpers for propagation of other removal errors and tolerance of `NotFound`.
 - [ ] Re-read source from byte zero; checkpoint the master hasher and position before each candidate, restore on mismatch, clean orphan chunks from the first invalid index and check disk space after resume validation. Run gate and stop for review.
 
 ## Task 6: Verify
@@ -118,7 +123,7 @@ Files: `cli/src/args.rs`, `signals.rs`, `terminal_progress.rs`, `main.rs`, `cli/
 
 ## Task 9: Documentation
 
-- [ ] Write `README.md` covering usage, layout, validation, resume, overwrite, cancellation, exit codes, filename-length limits and rename race. Explain that Linux-valid filename characters can be rejected for Windows compatibility. Record performance claims only after measurement. Run gate and stop for review.
+- [ ] Write `README.md` covering usage, layout, validation, resume, overwrite, cancellation, exit codes, filename-length limits and rename race. List concurrent splits into the same bundle as unsupported. Explain that Linux-valid filename characters can be rejected for Windows compatibility. Record performance claims only after measurement. Run gate and stop for review.
 
 ## Task 10: Efficiency and stress validation
 
