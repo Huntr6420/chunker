@@ -8,6 +8,7 @@ pub mod guard;
 pub mod manifest;
 pub mod progress;
 pub mod security;
+pub mod split;
 pub mod stream;
 
 pub use error::ChunkerError;
@@ -19,3 +20,4 @@ pub use manifest::{
 };
 pub use progress::{OperationKind, ProgressEvent};
 pub use security::{extract_filename, make_tmp_path, safe_parent, validate_plain_filename};
+pub use split::{SplitSummary, split_file, split_with_reader_unstable};
