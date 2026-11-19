@@ -187,3 +187,40 @@ impl Seek for ShortReadReader {
         self.inner.seek(pos)
     }
 }
+
+/// A reader wrapper that fails with an I/O error on its N-th `read()` call (1-based index).
+pub struct FailingReader {
+    inner: Cursor<Vec<u8>>,
+    target_read: usize,
+    current_read: usize,
+    error: Option<std::io::Error>,
+}
+
+impl FailingReader {
+    pub fn new(data: Vec<u8>, target_read: usize, error: std::io::Error) -> Self {
+        Self {
+            inner: Cursor::new(data),
+            target_read,
+            current_read: 0,
+            error: Some(error),
+        }
+    }
+}
+
+impl Read for FailingReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.current_read += 1;
+        if self.current_read == self.target_read {
+            if let Some(err) = self.error.take() {
+                return Err(err);
+            }
+        }
+        self.inner.read(buf)
+    }
+}
+
+impl Seek for FailingReader {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(pos)
+    }
+}
