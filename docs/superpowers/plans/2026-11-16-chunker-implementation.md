@@ -104,10 +104,31 @@ Files: `core/src/split.rs`, `core/tests/split_resume_test.rs`.
 
 ## Task 6: Verify
 
-Files: `core/src/verify.rs`, `lib.rs`, `core/tests/verify_test.rs`.
+Files: `core/src/verify.rs`, `core/src/lib.rs`, `core/tests/verify_test.rs`, and `core/tests/common/mod.rs`.
 
-- [ ] Test missing, truncated, same-size corrupt and reordered chunks, invalid master hash with valid chunk hashes, zero-byte files and cancellation.
-- [ ] Validate manifest, check chunk sizes, stream and retry interrupted reads, verify every chunk and master hash. Use cancellation and correct progress; run gate and stop for review.
+- [ ] Write and run failing tests first. Cover invalid manifests, missing chunks, truncated chunks, streamed length mismatches, same-size corruption, reordered chunks, a wrong master hash with valid chunk hashes, valid and invalid empty-file hashes, interrupted reads, other I/O errors, progress, and cancellation. In every failure test, assert the exact `ChunkerError` variant and message.
+- [ ] Export the non-stable integration-test seam with this exact signature.
+
+```rust
+#[doc(hidden)]
+pub fn verify_with_opener_unstable<R, O, F>(
+    manifest: &Manifest,
+    open_chunk: O,
+    cancel_token: Option<&Arc<AtomicBool>>,
+    on_progress: F,
+) -> Result<(), ChunkerError>
+where
+    R: std::io::Read,
+    O: FnMut(usize) -> std::io::Result<(R, u64)>,
+    F: FnMut(ProgressEvent);
+```
+
+- [ ] In `verify_bundle`, load and validate the manifest, build the opener from the bundle path using canonical chunk names, and delegate to the seam. The opener returns the reader and metadata length in bytes for a zero-based chunk index. Put the up-front metadata-size check in the shared function so tests can exercise it with the injected opener.
+- [ ] Stream with a fixed 1 MiB buffer, retry interrupted reads, propagate other I/O errors, check the actual bytes read, and verify each chunk hash and the master hash. Emit one `OperationKind::Verify` event per nonempty read, with cumulative bytes and `current_chunk` set to the zero-based index of the chunk containing the last byte of that read. Empty bundles emit no chunk progress.
+- [ ] Check cancellation at entry, at the top of each read-loop iteration, and immediately before returning success. Errors detected before cancellation is observed take precedence. Test the checkpoints and error precedence using deterministic callbacks or injected readers. Do not use watcher threads.
+- [ ] Verification must never modify the bundle. On both success and failure, compare the bundle's file list and file contents before and after verification and assert byte-for-byte equality.
+- [ ] Give each added check its own named test. Remove one check at a time, run the named test, and record the failure before restoring the check. Report equivalent mutants with the reason they cannot change observable behavior.
+- [ ] Run the full gate with all checks restored and stop for review.
 
 ## Task 7: Merge
 

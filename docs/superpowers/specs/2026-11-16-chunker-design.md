@@ -121,6 +121,17 @@ pub fn split_with_reader_unstable<R: std::io::Read + std::io::Seek, F>(
     on_progress: F,
 ) -> Result<SplitSummary, ChunkerError> where F: FnMut(ProgressEvent);
 pub fn verify_bundle<F>(bundle: &Path, cancel_token: Option<&Arc<AtomicBool>>, on_progress: F) -> Result<(), ChunkerError> where F: FnMut(ProgressEvent);
+#[doc(hidden)]
+pub fn verify_with_opener_unstable<R, O, F>(
+    manifest: &Manifest,
+    open_chunk: O,
+    cancel_token: Option<&Arc<AtomicBool>>,
+    on_progress: F,
+) -> Result<(), ChunkerError>
+where
+    R: std::io::Read,
+    O: FnMut(usize) -> std::io::Result<(R, u64)>,
+    F: FnMut(ProgressEvent);
 pub fn merge_bundle<F>(bundle: &Path, output: Option<&Path>, force: bool, cancel_token: Option<&Arc<AtomicBool>>, on_progress: F) -> Result<PathBuf, ChunkerError> where F: FnMut(ProgressEvent);
 pub struct TmpFileGuard { /* private state */ }
 impl TmpFileGuard { pub fn new(path: PathBuf) -> Self; pub fn empty() -> Self; pub fn reset(&mut self, path: PathBuf); pub fn disarm(&mut self); pub fn path(&self) -> Option<&Path>; }
@@ -129,6 +140,8 @@ pub fn is_cancelled(token: Option<&Arc<AtomicBool>>) -> bool;
 ```
 
 `SplitSummary.reused_chunks` counts validated existing chunks reused. The `#[doc(hidden)] pub` non-stable integration-test seam `split_with_reader_unstable` accepts a generic `Read + Seek`, original filename, expected size, chunk and buffer sizes, output, cancellation and progress context. It validates the original filename using the plain-filename check before using it. The shared reader retries `Interrupted`. Invalid public split arguments produce `ChunkerError::InvalidArgument(String)`.
+
+The `#[doc(hidden)] pub` non-stable integration-test seam `verify_with_opener_unstable` takes a validated manifest. Its opener receives the zero-based chunk index and returns a reader and its metadata length in bytes. `verify_bundle` builds this closure from the bundle path using canonical chunk names and delegates to the seam. The shared function compares the returned metadata length with the expected chunk size before reading.
 
 Integration tests use `core/tests/common/mod.rs` with `#![allow(dead_code)]` as a deliberate allowance for shared helpers unused by individual integration-test crates. Cancellation triggered from a progress callback must leave completed chunks intact, remove active `.tmp` files, and leave no manifest. Re-splitting removes a stale manifest before processing. A merge to an explicit output path with a nonexistent parent returns a clear error and creates no leftover files.
 

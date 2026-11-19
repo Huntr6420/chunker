@@ -6,7 +6,7 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 
 ## Last updated
 
-2026-11-19 at HEAD `a96aacacc745c6b1aecea7e75293c42a4543be87`.
+2026-11-19 at HEAD `8a546c86c7c95e6495d467297bbbd8ba20f999fd`.
 
 ## Current state
 
@@ -49,13 +49,6 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 - `clean_orphan_chunks` accepts names like `part-1.chk`. Consider enforcing canonical names while preserving indexes above 9999.
 - Consider using `rfind` in `extract_filename`.
 - Add Linux/macOS CI (see plan Task 11) and a `.gitattributes` with `* text=auto eol=lf`.
-- Review Task 5 rollback, reuse counts, progress, cancellation, and both orphan
-  cleanup stages against the current plan. Verify cleanup tolerates `NotFound`
-  and propagates other removal errors.
-- Check that Task 5 changes existing Task 4b tests only in how orphan fixtures
-  are created, as specified in the plan.
-- Run `cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`,
-  and `cargo test --workspace` before asking the owner to commit Task 5.
 
 ## Future (not in v1)
 
@@ -66,6 +59,5 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 
 ## Facts I could not verify
 
-- Task 5 gate results and review approval were not independently verified.
 - Linux or macOS test results and live remote branch state were not checked.
 - Decisions present only in chat cannot be verified from the repository.
