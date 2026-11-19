@@ -23,15 +23,18 @@ and say so. Do not silently change the spec or deviate from it.
 
 ## Working rules
 1. Work on ONE plan task at a time, then stop and wait for review.
-2. Test first: write a failing test, see it fail, then write the code.
+2. Test first when implementing or fixing behavior: write a failing test, see
+   it fail, then write the code. For tests of existing behavior, see Mutation
+   evidence below.
 3. Before calling a task done, run all of:
    - `cargo fmt`
    - `cargo clippy --workspace --all-targets -- -D warnings`
    - `cargo test --workspace`
 4. Keep diffs small. Do not refactor unrelated code.
-5. Do not add dependencies beyond those listed in the spec without asking.
-6. Do not run destructive commands (deleting folders, `git reset --hard`,
-   force pushes) without asking.
+5. Add a dependency only if both the approved spec and the task prompt
+   authorize it.
+6. The owner handles merges and pushes. Do not run destructive commands
+   (deleting folders, `git reset --hard`, force pushes) without asking.
 7. Do not commit. The owner commits after reviewing each task.
 
 ## Hard design constraints (summary; the spec has full detail)
@@ -85,6 +88,62 @@ stale/orphan cleanup, file growth error, safe parent path. Also cover:
 all chunks present but manifest missing, source size an exact multiple of the
 chunk size, changed source or chunk size on resume, and cancellation during the resume pass. Tests use temp directories
 and small chunk sizes; never require huge files.
+
+## Test and mutation conventions
+
+### Drafting prompts
+- State the operation order wherever it affects results: entry check, open,
+  metadata check, read, integrity checks, final check. Why: order decides which
+  error or cancellation wins.
+- Before a prompt goes to the builder, check every "must": can a test reach it,
+  what does it change that a test can see, can it hang, does it conflict with
+  another rule. Why: an unreachable rule produces a test that proves nothing.
+
+### Writing tests
+- Give each guard a test that reaches it. If another check can return the same
+  error, also assert exact read, progress or opener counts, or a distinguishing
+  field such as the file name. Why: otherwise a later check hides a deleted one.
+- Assert the exact error variant and the full displayed message, built
+  independently of the returned error. Why: comparing a message to itself cannot
+  fail.
+- Set cancellation tokens before the call, or from inside the injected reader or
+  callback. New tests use no threads, sleeps or timing. Older tests are not
+  rewritten unless a task says so. Why: the trigger must repeat every run.
+- Give every injected reader a hard call limit that panics with a clear message.
+  Expose the call count to the test when an exact count tells two paths apart
+  (for example, proving cancellation prevented a second read). Why: a broken
+  loop can spin forever, and an `io::Error` could be swallowed by the code under
+  test.
+- Fixtures must be able to show the property. A buffer test uses a chunk larger
+  than `BUFFER_SIZE` (for example 2 MiB) and asserts on the recorded read-slice
+  lengths, because the verifier caps each request at the bytes remaining. A
+  read-only test proves the fixture denies a read+write open, then restores
+  permissions. Surplus fixtures deliver one byte per call when counts matter.
+
+### Mutation evidence
+- A new test for behavior that is already correct may pass before the fix. Its
+  mutation shows what it catches. Record the actual pre-fix outcome either way.
+- Mutate one check at a time. Temporary edits to the production file are allowed
+  for this. Back it up to `$env:TEMP`, restore it after each run, and compare
+  `Get-FileHash` SHA-256 to the baseline before the next mutation and at the end.
+- Run `cargo test -p <crate> --test <file> -- <name> --exact` and show that exactly
+  one test ran. Do not run Clippy during mutations; run it after everything is
+  restored. Compile failures, hangs and timeouts do not count as caught. Explain
+  any genuine equivalent mutant.
+
+### Reporting
+- Scan the in-scope Rust files with `rg -n -- 'MUTATION|with_extension|println!|fs::read\('`.
+  Exit 1 means clean. Keep these strings out of panic messages, test names and
+  comments.
+- Report: (1) pre-fix commands and results, (2) mutation table with named tests,
+  failures and restore hashes, (3) full Cargo gate output and exit codes,
+  (4) full `git status --short`, (5) scan command, output and exit code,
+  (6) changed regions with paths.
+
+### Builder limits
+- The builder does not commit, merge, push, or edit `docs/`, `AGENTS.md` or
+  `STATUS.md`. It adds a dependency only if both the approved spec and the task
+  prompt authorize it. Out-of-scope needs are reported as blockers.
 
 ## Review mode
 When asked to review (not build), do not edit files. List bugs, deviations from
