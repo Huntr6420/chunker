@@ -6,7 +6,7 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 
 ## Last updated
 
-2026-11-19 at HEAD `8a546c86c7c95e6495d467297bbbd8ba20f999fd`.
+2026-11-20 at HEAD `14ec3def815261366ed43e931b1de81e92859483`.
 
 ## Current state
 
@@ -17,7 +17,11 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 - Task 4b committed at `aa49813` (streaming split). Plan commits `289d887`
   and `ac5a68d` record its decisions and follow-up requirements.
 - Task 5 committed at `8f14246` (checkpointed split resume) and merged into `main`.
-- Current branch is `main`. Next task is Task 6 (verify).
+- Task 6 committed at `14ec3de` (verify) and is on `main`.
+- Codex found the Task 6 review findings closed. Antigravity reported a passing
+  Cargo gate with 30 verify tests. Codex independently checked formatting,
+  whitespace, the forbidden-pattern scan, and all four final file hashes.
+- Next task is Task 7 (merge), after the owner approves the handoff.
 
 ## Decisions to remember
 
@@ -38,7 +42,12 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 - I/O buffers are fixed. Manifest metadata grows with the number of chunks,
   so there is no fixed ceiling on total memory (spec rev 2 §2).
 - Non-UTF-8 paths are rejected.
-- `load_manifest` treats any existing file path as a manifest.
+- `load_manifest` treats any existing file path as a manifest. For nonempty
+  bundles, pass the bundle directory to `verify_bundle`, which joins chunk
+  names onto the original argument.
+- If cancellation is observed after surplus bytes are seen during verification,
+  `SizeMismatch` reports the byte count observed so far. That count is a lower
+  bound on the stream length.
 - The parent directory is not synced after rename.
 - Watcher-thread cancellation tests depend on timing and must be rechecked on Linux CI.
 - `source_n != chunk_n` in the verification loop is an equivalent mutant (slice comparison covers it).
@@ -48,6 +57,9 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 
 - `clean_orphan_chunks` accepts names like `part-1.chk`. Consider enforcing canonical names while preserving indexes above 9999.
 - Consider using `rfind` in `extract_filename`.
+- The chunk name format `part-{:04}.chk` appears in several places. Consider
+  using a shared helper later.
+- Verification has no Windows symlink test.
 - Add Linux/macOS CI (see plan Task 11) and a `.gitattributes` with `* text=auto eol=lf`.
 
 ## Future (not in v1)
