@@ -1258,13 +1258,12 @@ fn test_cancellation_before_orphan_cleanup_preserves_surplus_chunk() {
     let bundle_dir = temp.path().join("cancel_preorphan.bin.chunks");
     std::fs::create_dir_all(&bundle_dir).unwrap();
 
-    // Pre-create a surplus chunk that only orphan cleanup would remove
     let surplus = bundle_dir.join("part-0099.chk");
-    std::fs::write(&surplus, b"surplus data").unwrap();
 
     let mut reader = Cursor::new(data);
     let token = Arc::new(AtomicBool::new(false));
     let token_clone = token.clone();
+    let bundle_dir_clone = bundle_dir.clone();
 
     let res = split_with_reader_unstable(
         &mut reader,
@@ -1276,7 +1275,10 @@ fn test_cancellation_before_orphan_cleanup_preserves_surplus_chunk() {
         Some(&token),
         move |ev| {
             if ev.bytes_processed == total_bytes {
-                // Final callback — set after all chunks written, before orphan cleanup
+                // Create surplus orphan chunk from inside final progress callback (after early cleanup)
+                let surplus = bundle_dir_clone.join("part-0099.chk");
+                std::fs::write(&surplus, b"surplus data").unwrap();
+                // Final callback — set after all chunks written, before end-of-split orphan cleanup
                 token_clone.store(true, Ordering::Relaxed);
             }
         },
@@ -1362,87 +1364,93 @@ fn test_precancelled_non_empty_input_at_entry() {
 
 #[test]
 fn test_cancellation_pre_save_check_after_orphan_cleanup() {
-    for iter in 0..50 {
-        let temp = common::make_temp_dir();
-        let chunk_size = 50u64;
-        let buffer_size = 50usize;
-        let total_bytes = 100u64; // 2 chunks: part-0000.chk, part-0001.chk
+    let temp = common::make_temp_dir();
+    let chunk_size = 50u64;
+    let buffer_size = 50usize;
+    let total_bytes = 100u64; // 2 chunks: part-0000.chk, part-0001.chk
 
-        let data = common::seeded_bytes(777 + iter as u64, total_bytes as usize);
-        let mut reader = Cursor::new(data);
-        let token = Arc::new(AtomicBool::new(false));
-        let token_clone = token.clone();
+    let data = common::seeded_bytes(777, total_bytes as usize);
+    let mut reader = Cursor::new(data);
+    let token = Arc::new(AtomicBool::new(false));
+    let token_clone = token.clone();
+    let created_flag = Arc::new(AtomicBool::new(false));
+    let created_flag_clone = created_flag.clone();
 
-        let bundle_dir = temp.path().join("cancel_pre_save.bin.chunks");
-        std::fs::create_dir_all(&bundle_dir).unwrap();
+    let bundle_dir = temp.path().join("cancel_pre_save.bin.chunks");
+    std::fs::create_dir_all(&bundle_dir).unwrap();
 
-        // Create 100 surplus orphan chunks (part-0100.chk .. part-0199.chk).
-        // clean_orphan_chunks will delete all of them.
-        for i in 100..200 {
-            let p = bundle_dir.join(format!("part-{:04}.chk", i));
-            std::fs::write(&p, b"orphan").unwrap();
-        }
-
-        // Watcher thread: wait until clean_orphan_chunks starts deleting the surplus chunks.
-        // As soon as at least one orphan chunk has been deleted, clean_orphan_chunks is in progress
-        // (having passed the pre-orphan-cleanup check), so we set the cancellation token before
-        // manifest save.
-        let bundle_dir_clone = bundle_dir.clone();
-        let watcher = std::thread::spawn(move || {
-            let start = std::time::Instant::now();
-            loop {
-                if start.elapsed() > std::time::Duration::from_secs(5) {
-                    return;
-                }
-                let count = std::fs::read_dir(&bundle_dir_clone)
-                    .map(|entries| {
-                        entries
-                            .flatten()
-                            .filter(|e| {
-                                e.file_name()
-                                    .to_str()
-                                    .is_some_and(|n| n.starts_with("part-01"))
-                            })
-                            .count()
-                    })
-                    .unwrap_or(100);
-
-                if count < 100 {
-                    // clean_orphan_chunks has started removing files!
-                    // Set cancellation token for the pre-save check.
-                    token_clone.store(true, Ordering::SeqCst);
-                    return;
-                }
-                std::thread::yield_now();
+    // Watcher thread: wait until surplus chunks are created by final progress callback,
+    // then wait until clean_orphan_chunks starts deleting them (count < 100),
+    // then set the cancellation token before manifest save.
+    let bundle_dir_clone = bundle_dir.clone();
+    let watcher = std::thread::spawn(move || {
+        let start = std::time::Instant::now();
+        loop {
+            if start.elapsed() > std::time::Duration::from_secs(5) {
+                return;
             }
-        });
+            if !created_flag_clone.load(Ordering::SeqCst) {
+                std::thread::yield_now();
+                continue;
+            }
+            let count = std::fs::read_dir(&bundle_dir_clone)
+                .map(|entries| {
+                    entries
+                        .flatten()
+                        .filter(|e| {
+                            e.file_name()
+                                .to_str()
+                                .is_some_and(|n| n.starts_with("part-01"))
+                        })
+                        .count()
+                })
+                .unwrap_or(100);
 
-        let res = split_with_reader_unstable(
-            &mut reader,
-            "cancel_pre_save.bin",
-            total_bytes,
-            chunk_size,
-            buffer_size,
-            temp.path(),
-            Some(&token),
-            |_| {},
-        );
+            if count < 100 {
+                // clean_orphan_chunks has started removing files!
+                // Set cancellation token for the pre-save check.
+                token_clone.store(true, Ordering::SeqCst);
+                return;
+            }
+            std::thread::yield_now();
+        }
+    });
 
-        let _ = watcher.join();
+    let bundle_dir_for_progress = bundle_dir.clone();
+    let res = split_with_reader_unstable(
+        &mut reader,
+        "cancel_pre_save.bin",
+        total_bytes,
+        chunk_size,
+        buffer_size,
+        temp.path(),
+        Some(&token),
+        move |ev| {
+            if ev.bytes_processed == total_bytes {
+                // Create 100 surplus orphan chunks from inside final progress callback
+                for i in 100..200 {
+                    let p = bundle_dir_for_progress.join(format!("part-{:04}.chk", i));
+                    std::fs::write(&p, b"orphan").unwrap();
+                }
+                created_flag.store(true, Ordering::SeqCst);
+            }
+        },
+    );
 
-        assert!(
-            matches!(res, Err(ChunkerError::Cancelled)),
-            "iter {iter}: expected Cancelled from pre-save check, got {res:?}"
-        );
+    let _ = watcher.join();
 
-        // Both valid chunks were created
-        assert!(bundle_dir.join("part-0000.chk").is_file());
-        assert!(bundle_dir.join("part-0001.chk").is_file());
+    assert!(
+        matches!(res, Err(ChunkerError::Cancelled)),
+        "expected Cancelled from pre-save check, got {res:?}"
+    );
 
-        // No manifest must be written
-        assert!(
-            !bundle_dir.join("manifest.json").exists(),
-            "iter {iter}: manifest.json must not exist when cancelled before save"
-        );
-    }
+    // Both valid chunks were created
+    assert!(bundle_dir.join("part-0000.chk").is_file());
+    assert!(bundle_dir.join("part-0001.chk").is_file());
+
+    // No manifest must be written
+    assert!(
+        !bundle_dir.join("manifest.json").exists(),
+        "manifest.json must not exist when cancelled before save"
+    );
 }

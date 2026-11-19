@@ -13,6 +13,23 @@ use crate::security::{extract_filename, make_tmp_path, validate_plain_filename};
 use crate::stream::{is_cancelled, read_retrying_unstable};
 use crate::{BUFFER_SIZE, MIN_CHUNK_SIZE};
 
+/// Reads until `buf` is completely filled or EOF is reached, retrying on `ErrorKind::Interrupted`.
+/// Returns the total number of bytes read.
+fn read_full<R: Read + ?Sized>(reader: &mut R, mut buf: &mut [u8]) -> std::io::Result<usize> {
+    let mut total = 0;
+    while !buf.is_empty() {
+        match read_retrying_unstable(reader, buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                total += n;
+                buf = &mut buf[n..];
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(total)
+}
+
 /// Summary of a file split operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SplitSummary {
@@ -100,9 +117,9 @@ where
     }
     clean_stale_tmp_files(&bundle_dir)?;
 
-    check_free_space(&bundle_dir, expected_size, 0, 1024 * 1024)?;
-
     if expected_size == 0 {
+        check_free_space(&bundle_dir, 0, 0, 1024 * 1024)?;
+
         // Probe for growth: a zero-expected source must have no bytes.
         let mut probe = [0u8; 1];
         match read_retrying_unstable(reader, &mut probe) {
@@ -153,12 +170,132 @@ where
     let total_chunks = usize::try_from(total_chunks_u64)
         .map_err(|_| ChunkerError::InvalidArgument("Total chunks exceeds usize capacity".into()))?;
 
-    let mut buffer = vec![0u8; buffer_size];
-    let mut total_bytes_read = 0u64;
-    let mut current_chunk_index = 0usize;
-    let mut current_chunk_written = 0u64;
+    // ── Resume phase: verify candidate chunks against source bytes ───────────
+    let mut resume_chunk_index = 0usize;
     let mut recorded_chunks: Vec<ChunkInfo> = Vec::with_capacity(total_chunks);
     let mut master_hasher = blake3::Hasher::new();
+    let mut total_bytes_read = 0u64;
+
+    let mut candidate_buffer_source = vec![0u8; buffer_size];
+    let mut candidate_buffer_chunk = vec![0u8; buffer_size];
+
+    while resume_chunk_index < total_chunks {
+        if is_cancelled(cancel_token) {
+            return Err(ChunkerError::Cancelled);
+        }
+
+        let chunk_filename = format!("part-{:04}.chk", resume_chunk_index);
+        let chunk_path = bundle_dir.join(&chunk_filename);
+
+        if !chunk_path.is_file() {
+            break;
+        }
+
+        let expected_this_chunk = if resume_chunk_index == total_chunks - 1 {
+            let rem = expected_size % chunk_size;
+            if rem == 0 { chunk_size } else { rem }
+        } else {
+            chunk_size
+        };
+
+        let meta = chunk_path.metadata()?;
+        if meta.len() != expected_this_chunk {
+            break;
+        }
+
+        // Checkpoint master hasher and reader position only after size check passes
+        let checkpoint_hasher = master_hasher.clone();
+        let checkpoint_pos = reader.stream_position()?;
+
+        let mut chunk_file = File::open(&chunk_path)?;
+        let mut chunk_hasher = blake3::Hasher::new();
+        let mut chunk_bytes_verified = 0u64;
+        let mut mismatch = false;
+
+        while chunk_bytes_verified < expected_this_chunk {
+            let to_read =
+                (expected_this_chunk - chunk_bytes_verified).min(buffer_size as u64) as usize;
+
+            let source_n = match read_full(reader, &mut candidate_buffer_source[..to_read]) {
+                Ok(n) => n,
+                Err(e) => {
+                    drop(chunk_file);
+                    return Err(ChunkerError::Io(e));
+                }
+            };
+
+            let chunk_n = match read_full(&mut chunk_file, &mut candidate_buffer_chunk[..to_read]) {
+                Ok(n) => n,
+                Err(e) => {
+                    drop(chunk_file);
+                    return Err(ChunkerError::Io(e));
+                }
+            };
+
+            if is_cancelled(cancel_token) {
+                drop(chunk_file);
+                return Err(ChunkerError::Cancelled);
+            }
+
+            if source_n == 0
+                || source_n != chunk_n
+                || candidate_buffer_source[..source_n] != candidate_buffer_chunk[..chunk_n]
+            {
+                mismatch = true;
+                break;
+            }
+
+            master_hasher.update(&candidate_buffer_source[..source_n]);
+            chunk_hasher.update(&candidate_buffer_chunk[..chunk_n]);
+            chunk_bytes_verified += source_n as u64;
+        }
+
+        // Drop chunk_file handle before early cleanup or writing (Windows file locking)
+        drop(chunk_file);
+
+        if mismatch || chunk_bytes_verified != expected_this_chunk {
+            // Rollback master hasher and reader position
+            master_hasher = checkpoint_hasher;
+            reader.seek(std::io::SeekFrom::Start(checkpoint_pos))?;
+            break;
+        }
+
+        let chunk_hash = chunk_hasher.finalize().to_hex().to_string();
+        recorded_chunks.push(ChunkInfo {
+            index: resume_chunk_index,
+            file_name: chunk_filename,
+            size_bytes: expected_this_chunk,
+            blake3: chunk_hash,
+        });
+
+        total_bytes_read += expected_this_chunk;
+
+        on_progress(ProgressEvent {
+            operation: OperationKind::Split,
+            current_chunk: resume_chunk_index,
+            total_chunks,
+            bytes_processed: total_bytes_read,
+            total_bytes: expected_size,
+        });
+
+        resume_chunk_index += 1;
+    }
+
+    // Check cancellation immediately before early cleanup
+    if is_cancelled(cancel_token) {
+        return Err(ChunkerError::Cancelled);
+    }
+
+    // Clean from first invalid index onward before writing
+    clean_orphan_chunks(&bundle_dir, resume_chunk_index)?;
+
+    // Single post-resume space check with verified bytes subtracted and 1 MiB overhead
+    check_free_space(&bundle_dir, expected_size, total_bytes_read, 1024 * 1024)?;
+
+    // ── Write phase: write remaining chunks ──────────────────────────────────
+    let mut buffer = vec![0u8; buffer_size];
+    let mut current_chunk_index = resume_chunk_index;
+    let mut current_chunk_written = 0u64;
     let mut chunk_hasher = blake3::Hasher::new();
 
     // Guard declared FIRST, writer declared SECOND for correct LIFO drop order on Windows.
@@ -326,6 +463,6 @@ where
 
     Ok(SplitSummary {
         bundle_path: bundle_dir,
-        reused_chunks: 0,
+        reused_chunks: resume_chunk_index,
     })
 }

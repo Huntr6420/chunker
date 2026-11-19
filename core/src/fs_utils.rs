@@ -34,6 +34,14 @@ pub fn check_free_space(
     Ok(())
 }
 
+fn handle_remove_result(res: std::io::Result<()>) -> Result<(), ChunkerError> {
+    match res {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(ChunkerError::Io(e)),
+    }
+}
+
 /// Cleans up stale temporary files left behind by interrupted operations.
 ///
 /// Strictly scoped to delete only `part-*.chk.tmp` and `manifest.json.tmp`.
@@ -46,7 +54,7 @@ pub fn clean_stale_tmp_files(bundle_dir: &Path) -> Result<(), ChunkerError> {
                     let is_stale_chunk = name.starts_with("part-") && name.ends_with(".chk.tmp");
                     let is_stale_manifest = name == "manifest.json.tmp";
                     if is_stale_chunk || is_stale_manifest {
-                        let _ = std::fs::remove_file(&path);
+                        handle_remove_result(std::fs::remove_file(&path))?;
                     }
                 }
             }
@@ -71,7 +79,7 @@ pub fn clean_orphan_chunks(bundle_dir: &Path, start_index: usize) -> Result<(), 
                     {
                         if let Ok(idx) = rest.parse::<usize>() {
                             if idx >= start_index {
-                                let _ = std::fs::remove_file(&path);
+                                handle_remove_result(std::fs::remove_file(&path))?;
                             }
                         }
                     }
@@ -80,4 +88,33 @@ pub fn clean_orphan_chunks(bundle_dir: &Path, start_index: usize) -> Result<(), 
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Error, ErrorKind};
+
+    #[test]
+    fn test_handle_remove_result_ok() {
+        assert!(handle_remove_result(Ok(())).is_ok());
+    }
+
+    #[test]
+    fn test_handle_remove_result_not_found_is_ok() {
+        let not_found = Error::new(ErrorKind::NotFound, "file not found");
+        assert!(handle_remove_result(Err(not_found)).is_ok());
+    }
+
+    #[test]
+    fn test_handle_remove_result_permission_denied_propagates() {
+        let perm_denied = Error::new(ErrorKind::PermissionDenied, "permission denied");
+        let res = handle_remove_result(Err(perm_denied));
+        match res {
+            Err(ChunkerError::Io(err)) => {
+                assert_eq!(err.kind(), ErrorKind::PermissionDenied);
+            }
+            other => panic!("expected ChunkerError::Io(PermissionDenied), got {other:?}"),
+        }
+    }
 }
