@@ -89,3 +89,14 @@ and small chunk sizes; never require huge files.
 ## Review mode
 When asked to review (not build), do not edit files. List bugs, deviations from
 the spec, and missing tests, ordered by severity, with file and line references.
+
+## Session start
+
+- Every agent reads `AGENTS.md`, then `docs/superpowers/STATUS.md`, then only
+  the spec sections and plan task relevant to the work.
+- Git history and the files on disk are the source of truth. If `STATUS.md`
+  disagrees with them, report the discrepancy and ask before acting.
+- Only the planner/reviewer (Codex) edits `STATUS.md`. Builders (Antigravity)
+  never edit `docs/`, `AGENTS.md`, or `STATUS.md`.
+- Codex updates `STATUS.md` after every task commit and whenever a decision is
+  made that is absent from the spec and plan.

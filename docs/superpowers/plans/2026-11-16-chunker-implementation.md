@@ -96,7 +96,11 @@ Files: `core/src/split.rs`, `core/tests/split_resume_test.rs`.
 - [ ] Test same-size corrupted middle chunk, missing/truncated chunks, all chunks valid without a manifest, cancellation during resume, changed source and changed chunk size. Assert restored content and accurate `reused_chunks`; valid earlier chunks are reused and invalid later chunks rebuilt.
 - [ ] Place a stale `manifest.json`, start a re-split, cancel partway, and assert `manifest.json` does not exist.
 - [ ] When reworking cleanup, make `clean_orphan_chunks` and `clean_stale_tmp_files` propagate `remove_file` errors other than `NotFound`. Test both helpers for propagation of other removal errors and tolerance of `NotFound`.
-- [ ] Re-read source from byte zero; checkpoint the master hasher and position before each candidate, restore on mismatch, clean orphan chunks from the first invalid index and check disk space after resume validation. Run gate and stop for review.
+- [ ] Re-read the source from byte zero. Checkpoint the master hasher and reader position before each candidate and restore both on mismatch. For each comparison, fill both buffer slices to the requested length, bounded by the bytes remaining in the chunk. Accumulate short reads and retry `Interrupted` so short reads alone do not cause a mismatch. Handle actual EOF and other I/O errors separately.
+- [ ] During resume, emit one progress event per verified chunk and none for rejected candidates. `bytes_processed` must never decrease, including across the transition to writing.
+- [ ] After resume verification, clean from the first invalid index before writing and check disk space using the verified prefix. A re-split with a different source overwrites existing chunks from the first mismatch onward. Keep the end-of-split orphan cleanup at `total_chunks` after the write phase and before saving the manifest.
+- [ ] Existing Task 4b tests may change only in how they create orphan fixtures. Create those orphans inside the final progress callback so they exercise the end-of-split cleanup. Keep the existing assertions.
+- [ ] Run the gate and stop for review.
 
 ## Task 6: Verify
 
