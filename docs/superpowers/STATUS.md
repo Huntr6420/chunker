@@ -6,7 +6,7 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 
 ## Last updated
 
-2026-11-18 at HEAD `ac5a68d6a16680a88cb167475d33a8347586f535`.
+2026-11-19 at HEAD `a96aacacc745c6b1aecea7e75293c42a4543be87`.
 
 ## Current state
 
@@ -16,15 +16,8 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 - Task 4a committed at `63045af` (streaming and test helpers).
 - Task 4b committed at `aa49813` (streaming split). Plan commits `289d887`
   and `ac5a68d` record its decisions and follow-up requirements.
-- Current branch `task-5` starts at `ac5a68d`, also the local `main` tip.
-  Checkpointed resume and cleanup changes are in the working tree. Modified
-  files are `core/src/fs_utils.rs`, `core/src/split.rs`,
-  `core/tests/common/mod.rs`, and `core/tests/split_basic_test.rs`.
-  `core/tests/split_resume_test.rs` is untracked. The plan has an uncommitted
-  Task 5 update. No Task 5 commit appears in the log.
-- Pending for Task 5: review the diff, verify the full gate, and let the
-  owner commit the approved changes.
-- Next task after Task 5 review and commit: Task 6, verify.
+- Task 5 committed at `8f14246` (checkpointed split resume) and merged into `main`.
+- Current branch is `main`. Next task is Task 6 (verify).
 
 ## Decisions to remember
 
@@ -48,16 +41,11 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 - `load_manifest` treats any existing file path as a manifest.
 - The parent directory is not synced after rename.
 - Watcher-thread cancellation tests depend on timing and must be rechecked on Linux CI.
+- `source_n != chunk_n` in the verification loop is an equivalent mutant (slice comparison covers it).
+- Zero-byte free-space check is untested.
 
 ## Open items
 
-- `source_n != chunk_n` in the verification loop is an equivalent mutant (slice comparison covers it); zero-byte free-space check is untested.
-- Task 5 follow-up (requested by the reviewer; the owner must confirm whether it was sent to Antigravity; report pending):
-  - Confirm the zero-byte path still has its own `check_free_space`.
-  - Take the minimum in `u64` before casting to `usize` in the verification loop.
-  - Add `read_full` and test that short reads from either the source or the chunk do not cause mismatches (see plan Task 5).
-  - Remove the unused `_origin_pos`.
-  - Run `test_cancellation_pre_save_check_after_orphan_cleanup` and the zero-byte pre-save test 50 times each.
 - `clean_orphan_chunks` accepts names like `part-1.chk`. Consider enforcing canonical names while preserving indexes above 9999.
 - Consider using `rfind` in `extract_filename`.
 - Add Linux/macOS CI (see plan Task 11) and a `.gitattributes` with `* text=auto eol=lf`.
@@ -69,9 +57,15 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 - Run `cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`,
   and `cargo test --workspace` before asking the owner to commit Task 5.
 
+## Future (not in v1)
+
+- After the chunker is built, add a storage layer across multiple Google Drive
+  accounts. Split files, upload each chunk to an account with free space, and
+  record where it lives so chunks can later be downloaded and rejoined.
+  Defer design and implementation until after the chunker is built.
+
 ## Facts I could not verify
 
-- Task 5 gate results and review approval. This handoff records files and Git
-  history. It does not attest that the in-progress implementation passes.
+- Task 5 gate results and review approval were not independently verified.
 - Linux or macOS test results and live remote branch state were not checked.
 - Decisions present only in chat cannot be verified from the repository.
