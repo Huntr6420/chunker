@@ -6,7 +6,7 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 
 ## Last updated
 
-2026-11-22. Task 7 is complete on `main` at `ef75cdb21775c138c2192bd41cf2d42d89e4ec8c`.
+2026-11-22. Task 8 CLI planning decisions are settled. The next step is one builder prompt for owner review.
 
 ## Current state
 
@@ -24,7 +24,10 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 - The agreed test and mutation conventions were added to `AGENTS.md` in
   `8d7ab45`.
 - Task 7 (merge) is committed at `ef75cdb`. The hard-link data-loss finding is closed.
-- Task 8 (CLI) awaits the owner's approval to begin.
+- At Task 8 kickoff, local and live remote `main` and the verified full-history
+  backup `D:\backup\chunker.bundle` all pointed to `0120473` (Task 7 status).
+- Task 8 implementation has not started. Claude drafts the prompt, Codex reviews
+  it, and the owner approves it before Antigravity builds on `task-8`.
 
 ## Decisions to remember
 
@@ -74,6 +77,62 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
   effect of removing `sync_all` or `guard.disarm()`, the checked-add overflow
   path, and bundle metadata errors other than `NotFound`.
 
+## Task 8 CLI handoff
+
+- Split defaults to the input's parent via `safe_parent` (`.` for a bare name).
+  An explicit `--output` selects the parent of the bundle. Merge passes output
+  and force through to core. Test omitted output, an existing directory and an
+  exact file path, plus overwrite refusal and forced replacement.
+- Verify accepts a bundle directory. Use metadata to distinguish an existing
+  non-directory from a missing path. For an existing file, verify and merge
+  both display `error: Invalid argument: Bundle path must be a directory: <path>`
+  and exit 2. A missing input or other filesystem error exits 1.
+- Parse arguments before installing the signal handler. Split defaults to
+  500 MiB. Its clap parser accepts whole MiB and converts to `u64` bytes with
+  checked multiplication. Zero gives `chunk size must be at least 1 MiB`;
+  conversion overflow gives `chunk size is too large`. Test 1 MiB and the
+  adjacent conversion boundaries 17592186044415 (fits) and 17592186044416
+  (overflows). For clap errors assert exit 2, empty stdout and the exact
+  application-authored fragment where applicable. Test a bad flag, nonnumeric
+  size and successful help separately.
+- Unit-test `exit_code(&Result<(), ChunkerError>) -> i32`: success 0,
+  `InvalidArgument` 2, `Cancelled` 130, other errors 1. Preserve typed core
+  errors and print their display once with the `error: ` prefix, except for
+  cancellation. The signal handler owns both notices from spec §4.8. The first
+  press sets the token; the second force-exits 130. Test both decisions without
+  signals or timing. Use `anyhow` for setup. Handler installation failure exits
+  1 before filesystem work and prints this line to stderr:
+  `error: Could not set up Ctrl+C handling, so nothing was started. Reason: <cause>`.
+- On success, stdout gets `Created bundle: <bundle path>`, `Merged file:
+  <destination path>` or `Verified bundle: <bundle path>`, each on one line
+  with a trailing newline. Use core's returned split/merge path and the supplied
+  verify path, preserving their spelling. Split adds `Reused chunks: <n>` on
+  a second line only if `SplitSummary.reused_chunks > 0`.
+- Progress goes to terminal stderr. Piped success has empty stderr. Set the
+  bar to cumulative `bytes_processed`, including verified reused chunks.
+  Clamp display values only. Empty operations draw no bar; unit-test a
+  synthetic zero-total event to guard against displaying `1/0`. Handle
+  fallible progress setup without panicking. D8 option 1 was approved: use
+  `writeln!` with stdout/stderr handles and handle write results. Keep the
+  existing AGENTS.md scan for all in-scope Rust files.
+- Use the five files listed in plan Task 8, private module unit tests and
+  `cli/tests/cli_test.rs` for real-binary tests via `CARGO_BIN_EXE_chunker`.
+  Use the existing dependencies. Put Context7 guidance in the builder prompt
+  with versioned official docs as fallback. The spec and plan govern behavior.
+- Resume fixture: give the binary an absolute input path to `sample.bin`
+  containing 1 MiB of zeros followed by `0xA5`. Split at 1 MiB. Run 1 must
+  print exactly `Created bundle: <bundle path>\n`. Delete only
+  `part-0001.chk`, leaving the manifest in place for run 2. Run the same
+  command again. Expect exactly `Created bundle: <bundle path>\nReused chunks: 1\n`.
+  Derive the path from the fixture, require exit 0 and empty stderr both times,
+  and use `File::open` plus `read_to_end` to check the restored chunk is exactly
+  `[0xA5]`. A zero-byte split also prints only the first line.
+- Evidence so far is from core tests and Windows probes, including clap 4.6.7
+  and a public split probe that reused 0, then 1, then 2 chunks. Actual CLI
+  wiring, OS signal delivery, handler installation failure and Linux execution
+  remain unverified. The three merge/verify surplus-counter overflow sites
+  return `InvalidArgument` and have no end-to-end fixture.
+
 ## Known limits for the README (Task 9)
 
 - Concurrent splits into the same bundle are unsupported (see plan Task 9).
@@ -98,7 +157,8 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 
 ## Open items
 
-- Review temp-file creation in split and manifest save in a later task. Both
+- Review temp-file creation in split and manifest save after Task 8 and before
+  the Task 9 README, as a separate task. Both
   still call `File::create`, which truncates an existing file at the temp path.
 - `clean_orphan_chunks` accepts names like `part-1.chk`. Consider enforcing canonical names while preserving indexes above 9999.
 - Consider using `rfind` in `extract_filename`.
@@ -116,5 +176,5 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 
 ## Facts I could not verify
 
-- Linux or macOS test results and live remote branch state were not checked.
+- Linux and macOS test results remain unverified.
 - Decisions present only in chat cannot be verified from the repository.

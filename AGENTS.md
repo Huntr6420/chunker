@@ -131,6 +131,23 @@ and small chunk sizes; never require huge files.
   restored. Compile failures, hangs and timeouts do not count as caught. Explain
   any genuine equivalent mutant.
 
+### CLI output and tests
+
+- See [Task 8 CLI handoff](docs/superpowers/STATUS.md#task-8-cli-handoff) for the
+  approved messages, exit codes and resume fixture.
+- Write CLI result lines to stdout and errors to stderr using `writeln!` on
+  the appropriate handle. Handle the write result. Show progress only when
+  stderr is a terminal. The forbidden-pattern scan also applies to CLI files.
+- In `cli/tests/cli_test.rs`, run the binary through `CARGO_BIN_EXE_chunker`.
+  Check the exit code and both streams. On piped success, compare all stdout,
+  including the final newline, against expectations built from the fixture,
+  and assert stderr is empty. For clap-wrapped validation errors, check the
+  exact Chunker-authored message inside clap's diagnostic.
+- Unit-test private exit-code, signal and progress helpers in their own modules.
+  For a binary unit-test mutation, use
+  `cargo test -p cli --bin chunker -- <fully-qualified-test-name> --exact`
+  and confirm exactly one test ran.
+
 ### Reporting
 - Scan the in-scope Rust files with `rg -n -- 'MUTATION|with_extension|println!|fs::read\('`.
   Exit 1 means clean. Keep these strings out of panic messages, test names and
