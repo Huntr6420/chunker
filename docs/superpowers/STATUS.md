@@ -6,7 +6,7 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 
 ## Last updated
 
-2026-11-20 at HEAD `14ec3def815261366ed43e931b1de81e92859483`.
+2026-11-21 at HEAD `8d7ab454acb2373a8e6b91e1f7f0504acb5cc0d6` on `task-7`.
 
 ## Current state
 
@@ -21,16 +21,41 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 - Codex found the Task 6 review findings closed. Antigravity reported a passing
   Cargo gate with 30 verify tests. Codex independently checked formatting,
   whitespace, the forbidden-pattern scan, and all four final file hashes.
-- Next task is Task 7 (merge), after the owner approves the handoff.
+- The agreed test and mutation conventions were added to `AGENTS.md` in
+  `8d7ab45`.
+- Task 7 (merge) is in planning on `task-7`. The spec, plan, and existing
+  helpers were reviewed read-only. Merge implementation has not started.
 
 ## Decisions to remember
 
 - Session handoff ownership and update rules are recorded in `AGENTS.md`.
 - Antigravity builds one task per chat on branch `task-N` and never commits. Codex plans, reviews, and edits only docs. The owner runs the gate and commits code and docs separately, then merges with `--ff-only`.
-- For every added guard or check, remove it temporarily and name the test that fails, then restore it. If no test fails, add one.
-- Reviews require the initial failing output, a mutation table, full gate output, `git status --short`, and changed source regions. A summary line alone is insufficient.
+- Follow "Test and mutation conventions" in `AGENTS.md` for prompt drafting,
+  deterministic tests, mutation restoration, and the six report items.
 - Errors found before cancellation is observed take precedence. Once manifest save returns `Ok`, never return `Cancelled` (see plan Task 4b, inherited by Task 5).
 - Use PowerShell. Running PowerShell syntax in `cmd` can create junk files in the repository root.
+
+## Task 7 approved decisions
+
+- With no explicit output, place the validated original filename beside the
+  bundle. Merge accepts a bundle directory.
+- Add a hidden reader/writer seam for merge streaming and hashing. The public
+  wrapper owns the output file and its finalization.
+- Move `BoundedReader` into `core/tests/common/mod.rs` for reuse. The owner
+  approved edits to that file and `core/tests/verify_test.rs` for the move.
+- After each expected payload, probe once for surplus. Keep the existing
+  `SizeMismatch` message and report the observed count as a lower bound.
+  If the probe finds surplus, the size error takes precedence over cancellation.
+  The spec and Task 7 plan record these decisions.
+
+## Task 7 decisions pending owner approval
+
+- Cancellation order. Proposed: check before manifest I/O, at the top of
+  payload read iterations, and immediately before rename, after sync, close,
+  and the no-force destination recheck. Return success after a successful rename.
+- Missing output parent and empty-bundle progress. Proposed: report a stable
+  `Io(NotFound)` error before checking space or opening a temp file, and emit
+  no progress events for an empty bundle.
 
 ## Known limits for the README (Task 9)
 

@@ -133,6 +133,19 @@ where
     O: FnMut(usize) -> std::io::Result<(R, u64)>,
     F: FnMut(ProgressEvent);
 pub fn merge_bundle<F>(bundle: &Path, output: Option<&Path>, force: bool, cancel_token: Option<&Arc<AtomicBool>>, on_progress: F) -> Result<PathBuf, ChunkerError> where F: FnMut(ProgressEvent);
+#[doc(hidden)]
+pub fn merge_with_opener_unstable<R, O, W, F>(
+    manifest: &Manifest,
+    open_chunk: O,
+    writer: &mut W,
+    cancel_token: Option<&Arc<AtomicBool>>,
+    on_progress: F,
+) -> Result<(), ChunkerError>
+where
+    R: std::io::Read,
+    O: FnMut(usize) -> std::io::Result<(R, u64)>,
+    W: std::io::Write,
+    F: FnMut(ProgressEvent);
 pub struct TmpFileGuard { /* private state */ }
 impl TmpFileGuard { pub fn new(path: PathBuf) -> Self; pub fn empty() -> Self; pub fn reset(&mut self, path: PathBuf); pub fn disarm(&mut self); pub fn path(&self) -> Option<&Path>; }
 pub fn is_cancelled(token: Option<&Arc<AtomicBool>>) -> bool;
@@ -142,6 +155,10 @@ pub fn is_cancelled(token: Option<&Arc<AtomicBool>>) -> bool;
 `SplitSummary.reused_chunks` counts validated existing chunks reused. The `#[doc(hidden)] pub` non-stable integration-test seam `split_with_reader_unstable` accepts a generic `Read + Seek`, original filename, expected size, chunk and buffer sizes, output, cancellation and progress context. It validates the original filename using the plain-filename check before using it. The shared reader retries `Interrupted`. Invalid public split arguments produce `ChunkerError::InvalidArgument(String)`.
 
 The `#[doc(hidden)] pub` non-stable integration-test seam `verify_with_opener_unstable` takes a validated manifest. Its opener receives the zero-based chunk index and returns a reader and its metadata length in bytes. `verify_bundle` builds this closure from the bundle path using canonical chunk names and delegates to the seam. The shared function compares the returned metadata length with the expected chunk size before reading.
+
+`merge_bundle` takes a bundle directory. If `output` is `None`, it joins the validated original filename to `safe_parent(bundle)`, placing the output beside the bundle.
+
+The `#[doc(hidden)] pub` non-stable integration-test seam `merge_with_opener_unstable` takes a validated manifest. Its opener receives the zero-based chunk index and returns a reader and its metadata length in bytes. The seam checks the metadata and streamed lengths, streams bytes into the supplied writer, and verifies chunk and master hashes. The public wrapper owns output path resolution, free-space checks, temporary-file cleanup, syncing, and rename.
 
 Integration tests use `core/tests/common/mod.rs` with `#![allow(dead_code)]` as a deliberate allowance for shared helpers unused by individual integration-test crates. Cancellation triggered from a progress callback must leave completed chunks intact, remove active `.tmp` files, and leave no manifest. Re-splitting removes a stale manifest before processing. A merge to an explicit output path with a nonexistent parent returns a clear error and creates no leftover files.
 
@@ -664,17 +681,19 @@ Ok(bundle_dir)
 ### 4.7 Merge and Verify Algorithms
 
 #### `merge_bundle`
-1. Load & validate manifest.
-2. Resolve destination path (`safe_parent`, use the validated filename).
+1. Require a bundle directory. Load and validate its manifest.
+2. Resolve the destination. If `output` is `None`, use `safe_parent(bundle)` joined with the validated original filename. If `output` is an existing directory, join the filename to it. Otherwise use the explicit output path.
 3. Check destination existence: if exists and `!force`, return `Err(DestinationAlreadyExists)`.
 4. Check free space on destination parent directory.
 5. For a 0-byte file validate its empty master hash, then create a guarded empty temporary file and use the same finalization path.
 6. Open destination `.tmp` file guarded by `TmpFileGuard`.
-7. Initialize master hasher.
+7. Delegate streaming and hashing to `merge_with_opener_unstable` with an opener for canonical chunk paths and the temporary file as the writer. The seam initializes the master hasher.
 8. For each chunk:
    * Verify size matches `chunk.size_bytes` via metadata.
    * Stream chunk in 1 MiB buffers, retrying on `ErrorKind::Interrupted`.
    * Update chunk hasher and master hasher.
+   * Once the expected payload length is read, make one probe using the same I/O buffer and the interrupted-read retry helper. If the probe returns surplus bytes, return `SizeMismatch` with `actual` set to the checked sum of the expected length and the bytes read by the probe. Stop without draining. The reported count is a lower bound on the chunk length. Use the existing `SizeMismatch` message.
+   * After the expected payload is read, run the probe before checking cancellation again. If the token is set and the probe finds surplus, return the size error. Probe bytes are not written, hashed, or reported as progress. If the probe reaches EOF, continue with integrity checks.
    * Verify finalized chunk hash matches `chunk.blake3`.
 9. Verify finalized master hash matches `manifest.original_file.blake3`.
 10. Flush via `sync_all`, close, re-check destination without force, then use `fs::rename` and disarm the guard. The check-to-rename race remains; replacement depends on platform and filesystem.

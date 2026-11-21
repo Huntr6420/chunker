@@ -132,10 +132,18 @@ where
 
 ## Task 7: Merge
 
-Files: `core/src/merge.rs`, `lib.rs`, `core/tests/merge_test.rs`.
+Files: `core/src/merge.rs`, `core/src/lib.rs`, `core/tests/merge_test.rs`,
+`core/tests/common/mod.rs`, and `core/tests/verify_test.rs`. The last two
+files are in scope for moving `BoundedReader` and updating its references.
 
 - [ ] Test round trip, zero-byte input, existing output with and without force, corruption, cancellation, cleanup and preservation of an existing destination on failure.
 - [ ] Test an existing output directory resolves to that directory plus original filename; verify returned path and bytes. Test an explicit output file resolves exactly to that path, verifies returned path and bytes, and enforces overwrite protection.
+- [ ] Test that `output: None` resolves to the bundle directory's parent joined with the validated original filename.
+- [ ] Test directory-only input by passing an existing file, including a direct path to a valid zero-byte `manifest.json`. Assert `ChunkerError::InvalidArgument` and the full message `Invalid argument: Bundle path must be a directory: <path>`, using the supplied path's display form. Assert that no output or temporary file was created.
+- [ ] Export `merge_with_opener_unstable` with the hidden signature in the spec's Public API. Use injected readers and a writer to cover interrupted reads, read and write errors, and the actual buffer slice lengths. Exercise output path handling and temporary-file finalization through `merge_bundle` with real files.
+- [ ] Test the single surplus probe with metadata and hashes that match a 100-byte payload. Return one surplus byte with more available. Assert exactly two reads, one payload progress event, and `SizeMismatch` with expected 100 and actual 101. Assert the existing full message, `Chunk size mismatch for part-0000.chk: expected 100 bytes, got 101 bytes`. Repeat with the cancellation token set on the final payload event and expect the same size error.
+- [ ] In the 2 MiB buffer test, assert the slice lengths for both payload reads and the EOF probe. A reader that fills each payload request sees three slices of length `BUFFER_SIZE`.
+- [ ] Move `BoundedReader` from `verify_test.rs` to `common/mod.rs` so merge and verify tests can reuse it. Preserve the hard panic limit and expose the call count to tests that need exact counts. Limit edits in `verify_test.rs` to removing the local definition and updating helper references. Run the verify integration tests to confirm the move preserves their behavior.
 - [ ] Test an explicit `-o` file path whose parent directory does not exist; expect a clear error and assert no output, temporary file or newly created parent directory is left behind.
 - [ ] Validate, check space, stream and hash into guarded `.tmp`, sync and close. Without force re-check existence immediately before `fs::rename`; with force use rename and propagate errors. Document the remaining race. Run gate and stop for review.
 
