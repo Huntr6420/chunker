@@ -4,7 +4,7 @@
 
 use std::io::{Cursor, ErrorKind, Read, Seek, SeekFrom};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tempfile::TempDir;
 
 /// Generates `len` deterministic pseudo-random bytes from `seed` using a hand-written
@@ -220,6 +220,60 @@ impl Read for FailingReader {
 }
 
 impl Seek for FailingReader {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(pos)
+    }
+}
+
+/// Reusable bounded reader wrapping any `Read` type that enforces a hard call bound.
+pub struct BoundedReader<R> {
+    inner: R,
+    calls: usize,
+    max_calls: usize,
+    shared_calls: Option<Arc<AtomicUsize>>,
+}
+
+impl<R: Read> BoundedReader<R> {
+    pub fn new(inner: R, max_calls: usize) -> Self {
+        Self {
+            inner,
+            calls: 0,
+            max_calls,
+            shared_calls: None,
+        }
+    }
+
+    pub fn with_shared_calls(inner: R, max_calls: usize, shared_calls: Arc<AtomicUsize>) -> Self {
+        Self {
+            inner,
+            calls: 0,
+            max_calls,
+            shared_calls: Some(shared_calls),
+        }
+    }
+
+    pub fn calls(&self) -> usize {
+        self.calls
+    }
+}
+
+impl<R: Read> Read for BoundedReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.calls += 1;
+        if let Some(ref sc) = self.shared_calls {
+            sc.fetch_add(1, Ordering::SeqCst);
+        }
+        if self.calls > self.max_calls {
+            panic!(
+                "BoundedReader call limit exceeded: {} > {}",
+                self.calls, self.max_calls
+            );
+        }
+        self.inner.read(buf)
+    }
+}
+
+impl<R: Seek> Seek for BoundedReader<R> {
     fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
         self.inner.seek(pos)
     }

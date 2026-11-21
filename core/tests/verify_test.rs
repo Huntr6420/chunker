@@ -14,35 +14,7 @@ use chunker_core::progress::OperationKind;
 use chunker_core::split::split_file;
 use chunker_core::verify::{verify_bundle, verify_with_opener_unstable};
 
-/// Reusable bounded reader wrapping any `Read` type that enforces a hard call bound.
-struct BoundedReader<R> {
-    inner: R,
-    calls: usize,
-    max_calls: usize,
-}
-
-impl<R: Read> BoundedReader<R> {
-    fn new(inner: R, max_calls: usize) -> Self {
-        Self {
-            inner,
-            calls: 0,
-            max_calls,
-        }
-    }
-}
-
-impl<R: Read> Read for BoundedReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        self.calls += 1;
-        if self.calls > self.max_calls {
-            panic!(
-                "BoundedReader call limit exceeded: {} > {}",
-                self.calls, self.max_calls
-            );
-        }
-        self.inner.read(buf)
-    }
-}
+use common::BoundedReader;
 
 /// Helper to create a valid bundle on disk for testing.
 fn create_test_bundle(output_dir: &Path, file_name: &str, data: &[u8], chunk_size: u64) -> PathBuf {

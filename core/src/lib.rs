@@ -6,6 +6,7 @@ pub mod error;
 pub mod fs_utils;
 pub mod guard;
 pub mod manifest;
+pub mod merge;
 pub mod progress;
 pub mod security;
 pub mod split;
@@ -19,6 +20,7 @@ pub use manifest::{
     ChunkInfo, Manifest, OriginalFileInfo, load_manifest, resolve_bundle_and_manifest,
     save_manifest_atomic, validate_hex_hash, validate_manifest,
 };
+pub use merge::{merge_bundle, merge_with_opener_unstable};
 pub use progress::{OperationKind, ProgressEvent};
 pub use security::{extract_filename, make_tmp_path, safe_parent, validate_plain_filename};
 pub use split::{SplitSummary, split_file, split_with_reader_unstable};
