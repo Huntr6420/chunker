@@ -681,22 +681,21 @@ Ok(bundle_dir)
 ### 4.7 Merge and Verify Algorithms
 
 #### `merge_bundle`
-1. Require a bundle directory. Load and validate its manifest.
+1. Check cancellation before filesystem I/O. Inspect the bundle path with `fs::metadata`. Reject an existing non-directory with `InvalidArgument("Bundle path must be a directory: <path>")`, using the path's display form. Let `NotFound` fall through to manifest loading and propagate other metadata errors. Load the manifest with `load_manifest`, which also validates it.
 2. Resolve the destination. If `output` is `None`, use `safe_parent(bundle)` joined with the validated original filename. If `output` is an existing directory, join the filename to it. Otherwise use the explicit output path.
-3. Check destination existence: if exists and `!force`, return `Err(DestinationAlreadyExists)`.
-4. Check free space on destination parent directory.
-5. For a 0-byte file validate its empty master hash, then create a guarded empty temporary file and use the same finalization path.
-6. Open destination `.tmp` file guarded by `TmpFileGuard`.
-7. Delegate streaming and hashing to `merge_with_opener_unstable` with an opener for canonical chunk paths and the temporary file as the writer. The seam initializes the master hasher.
-8. For each chunk:
-   * Verify size matches `chunk.size_bytes` via metadata.
-   * Stream chunk in 1 MiB buffers, retrying on `ErrorKind::Interrupted`.
-   * Update chunk hasher and master hasher.
-   * Once the expected payload length is read, make one probe using the same I/O buffer and the interrupted-read retry helper. If the probe returns surplus bytes, return `SizeMismatch` with `actual` set to the checked sum of the expected length and the bytes read by the probe. Stop without draining. The reported count is a lower bound on the chunk length. Use the existing `SizeMismatch` message.
-   * After the expected payload is read, run the probe before checking cancellation again. If the token is set and the probe finds surplus, return the size error. Probe bytes are not written, hashed, or reported as progress. If the probe reaches EOF, continue with integrity checks.
-   * Verify finalized chunk hash matches `chunk.blake3`.
-9. Verify finalized master hash matches `manifest.original_file.blake3`.
-10. Flush via `sync_all`, close, re-check destination without force, then use `fs::rename` and disarm the guard. The check-to-rename race remains; replacement depends on platform and filesystem.
+3. Check that `safe_parent(destination)` exists and is a directory. For a missing parent or a parent that is a file, return `ChunkerError::Io` with `ErrorKind::NotFound` and the inner message `Output parent directory does not exist: <parent>`. Propagate other metadata errors. Then check destination existence. If it exists and `force` is false, return `DestinationAlreadyExists` before writing.
+4. Call `check_free_space(parent, original_size_bytes, 0, 0)`. Merge needs room for the full temporary output, including when an existing destination will be replaced. It credits no existing bytes and adds no overhead allowance.
+5. Append `.tmp` to the destination with `make_tmp_path`. Declare `TmpFileGuard` before the temporary file handle so the handle closes before cleanup. Open the temporary file under the guard.
+6. Delegate streaming and hashing to `merge_with_opener_unstable`. The opener uses canonical chunk paths, opens each file read-only, and gets its metadata length from the open handle. The seam checks cancellation at entry, allocates one 1 MiB heap buffer, and initializes the master hasher.
+7. For each chunk:
+   * Check the opened chunk's metadata length before reading. Check cancellation at the top of each payload read-loop iteration.
+   * Read at most the remaining payload bytes into the buffer, retrying `ErrorKind::Interrupted` and propagating other errors. If EOF is reached before the expected payload length, return `SizeMismatch`.
+   * Feed both hashers and write each nonempty payload read to the supplied writer. After the write succeeds, emit one `OperationKind::Merge` event with the zero-based chunk index and cumulative bytes.
+   * Once the expected payload length is read, make one probe with the same buffer and the interrupted-read retry helper. If the probe finds surplus, return `SizeMismatch` with the checked sum of the expected length and the observed surplus. On overflow, return `InvalidArgument("Chunk size overflow")`. The observed count is a lower bound. Keep the existing `SizeMismatch` message.
+   * Run the probe before observing cancellation again. A surplus size error wins if the token is set. Probe bytes are neither written nor hashed and produce no progress. On EOF, continue with the chunk hash check. Reject a chunk hash mismatch.
+8. Verify the master hash against `manifest.original_file.blake3`. An empty bundle follows the same path with no chunks and no progress events. `load_manifest` already validates its empty-file hash.
+9. Call `sync_all` and close the temporary file. If `force` is false, recheck destination existence and return `DestinationAlreadyExists` if it exists. Then check cancellation immediately before rename. Errors found before cancellation is observed take precedence.
+10. Use `fs::rename` and propagate failures. With force, replacement depends on the platform and filesystem. The check-to-rename race remains without force. After a successful rename, disarm the guard and return the destination path without another cancellation check.
 
 #### `verify_bundle`
 1. Load & validate manifest.
