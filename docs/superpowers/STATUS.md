@@ -6,9 +6,8 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 
 ## Last updated
 
-2026-11-22. Task 8 CLI is complete. Code commit `e3628b2` is on local `main`
-after a fast-forward merge from `task-8`. The final audit confirmed Task 8's
-approval.
+2026-11-23. Split and manifest temp-file hardening is complete at code commit
+`7512db7`. Task 9 documentation is next.
 
 ## Current state
 
@@ -27,6 +26,7 @@ approval.
   `8d7ab45`.
 - Task 7 (merge) is committed at `ef75cdb`. The hard-link data-loss finding is closed.
 - Task 8 (CLI) is committed at `e3628b2` after the Windows review.
+- Split and manifest temp-file hardening is committed at `7512db7`.
 - At the last transfer check, GitHub and `D:\backup\chunker.bundle` both had
   `main` at `0120473` (Task 7 status). Task 8 is available in this local
   checkout. To transfer it via a folder copy, include the hidden `.git` folder.
@@ -162,8 +162,25 @@ approval.
   a real closed stdout, and bundle preservation after a stdout failure.
   The three core surplus-counter overflow sites also lack fixtures.
 
-1. Review split and manifest temp-file hardening as a separate task.
-2. Start the Task 9 README after that review and follow-up are complete.
+## Split and manifest temp-file hardening review
+
+- Codex approved the five-file change at `7512db7`. Split still
+  removes recognized stale temp files at startup. Both writers use
+  `create_new(true)` and arm cleanup only after a successful open.
+- Codex independently passed formatting check, Clippy, and all 199 workspace
+  tests on Windows. All six mutation replays failed at the intended
+  assertions, and the restored source hashes matched. The captured builder
+  log is archived at `D:\backup\tmp-hardening.log`. Its SHA-256 matches the
+  original. The scan found the same 12 pre-existing hits as the baseline.
+- T2 covers a directory occupying a chunk temp path. On Windows it passed
+  before the fix because both versions refused the open. It checks the
+  platform's error and preserves the directory and marker. T1 and T3
+  distinguish the old truncating behavior.
+- Keep the small file-reading helpers local to their tests and retain the
+  repeated refusal message in the three writers for this follow-up. Shared
+  helpers can be considered in a later cleanup.
+- Linux/macOS behavior, read-only occupied entries, and real concurrent
+  creation of a temp entry remain unverified.
 
 ## Known limits for the README (Task 9)
 
@@ -189,12 +206,8 @@ approval.
 
 ## Open items
 
-- Review temp-file creation in split and manifest save after Task 8 and before
-  the Task 9 README, as a separate task. Both
-  still call `File::create`, which truncates an existing file at the temp path.
 - Remove the misplaced cancellation comment from the general diagnostic write
-  in `cli/src/main.rs` (`report_result`) during a later cleanup. It can be
-  bundled into the temp-file follow-up if that prompt explicitly includes it.
+  in `cli/src/main.rs` (`report_result`) during a later cleanup.
 - `clean_orphan_chunks` accepts names like `part-1.chk`. Consider enforcing canonical names while preserving indexes above 9999.
 - Consider using `rfind` in `extract_filename`.
 - The chunk name format `part-{:04}.chk` appears in several places. Consider
