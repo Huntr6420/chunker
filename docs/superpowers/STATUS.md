@@ -6,8 +6,8 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 
 ## Last updated
 
-2026-11-23. Split and manifest temp-file hardening is complete at code commit
-`7512db7`. Task 9 documentation is next.
+2026-11-23. CLI test cleanup is complete at code commit `384a8ad`.
+Task 9 documentation is next.
 
 ## Current state
 
@@ -149,9 +149,17 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
   state, and production stderr terminal detection. The code commit contains
   exactly five CLI files. The Cargo manifests, lockfile, and `core/` match the
   Task 8 baseline.
-- Two fixture setup splits, in the merge and verify integration tests, assert
-  exit 0 only. Their stdout and stderr checks remain optional test cleanup.
-  Live rendering in an interactive terminal remains unverified. Unit tests
+- At `384a8ad`, the merge and verify setup splits check exit 0, the full
+  success line including its newline, and empty stderr. The comment in
+  `report_result` now explains why a diagnostic write failure is ignored.
+- Both strengthened tests passed before mutation. Changing `Created bundle:`
+  to `Created bundlee:` made each fail at its new stdout assertion. The log
+  records both restore hashes and 199 passing workspace tests on Windows.
+  Codex independently passed all nine CLI integration tests. The stderr checks
+  passed in normal runs. Fresh build directories were builder-reported.
+  The archived evidence at `D:\backup\cli-leftovers.log` matches the original
+  log's SHA-256.
+- Live rendering in an interactive terminal remains unverified. Unit tests
   cover terminal gating, zero totals, and progress clamping.
 - The Task 8 evidence record is archived at `D:\backup\task8-followup.log`
   and `D:\backup\task8-followup2.log`. Both copies match the SHA-256 hashes
@@ -209,8 +217,6 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 
 ## Open items
 
-- Remove the misplaced cancellation comment from the general diagnostic write
-  in `cli/src/main.rs` (`report_result`) during a later cleanup.
 - `clean_orphan_chunks` accepts names like `part-1.chk`. Consider enforcing canonical names while preserving indexes above 9999.
 - Consider using `rfind` in `extract_filename`.
 - The chunk name format `part-{:04}.chk` appears in several places. Consider
