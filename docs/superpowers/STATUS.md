@@ -6,8 +6,8 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 
 ## Last updated
 
-2026-11-23. CLI test cleanup is complete at code commit `384a8ad`.
-Task 9 documentation is next.
+2026-11-23. Task 9 documentation is complete at `1ee6405`.
+Task 10 efficiency and stress validation is next.
 
 ## Current state
 
@@ -27,6 +27,13 @@ Task 9 documentation is next.
 - Task 7 (merge) is committed at `ef75cdb`. The hard-link data-loss finding is closed.
 - Task 8 (CLI) is committed at `e3628b2` after the Windows review.
 - Split and manifest temp-file hardening is committed at `7512db7`.
+- The Task 9 README is committed at `1ee6405`. Codex ran the Windows gate
+  (199 tests passed) and the release build. Running the README's PowerShell
+  blocks verbatim produced the documented output and matching SHA-256 hashes.
+  A separate resume run reused two chunks, rebuilt the missing third chunk with
+  its original bytes verified by SHA-256, and passed bundle verification.
+- The builder's gate and demo logs are archived at `D:\backup\task9-readme.log`
+  and `D:\backup\chunker-demo.log`. Each copy matches its original SHA-256.
 - At the last transfer check, GitHub and `D:\backup\chunker.bundle` both had
   `main` at `0120473` (Task 7 status). Task 8 is available in this local
   checkout. To transfer it via a folder copy, include the hidden `.git` folder.
