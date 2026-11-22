@@ -1454,3 +1454,71 @@ fn test_cancellation_pre_save_check_after_orphan_cleanup() {
         "manifest.json must not exist when cancelled before save"
     );
 }
+
+fn read_file_content(path: &std::path::Path) -> Vec<u8> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).unwrap();
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).unwrap();
+    buf
+}
+
+#[test]
+fn test_split_chunk_temp_is_directory() {
+    let temp = common::make_temp_dir();
+
+    // Scratch layout probe to determine platform error kind for create_new on directory
+    let scratch_dir = temp.path().join("scratch_dir");
+    std::fs::create_dir_all(&scratch_dir).unwrap();
+    let scratch_res = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&scratch_dir);
+    let scratch_err = scratch_res.expect_err("create_new on directory must fail");
+    let scratch_kind = scratch_err.kind();
+    let scratch_raw = scratch_err.raw_os_error();
+
+    let bundle_dir = temp.path().join("dir_tmp.bin.chunks");
+    std::fs::create_dir_all(&bundle_dir).unwrap();
+    let tmp_path = bundle_dir.join("part-0000.chk.tmp");
+    std::fs::create_dir_all(&tmp_path).unwrap();
+    let marker_file = tmp_path.join("marker.txt");
+    let marker_bytes = b"marker content inside chunk temp directory".to_vec();
+    std::fs::write(&marker_file, &marker_bytes).unwrap();
+
+    let data = vec![0x42u8; 100];
+    let mut reader = Cursor::new(data);
+    let mut progress_count = 0;
+    let res = split_with_reader_unstable(
+        &mut reader,
+        "dir_tmp.bin",
+        100,
+        100,
+        100,
+        temp.path(),
+        None,
+        |_| progress_count += 1,
+    );
+
+    match res {
+        Err(ref err @ ChunkerError::Io(ref io_err)) => {
+            assert_eq!(io_err.kind(), scratch_kind);
+            if scratch_kind == std::io::ErrorKind::AlreadyExists {
+                let expected_msg = format!(
+                    "I/O error: Temporary file already exists: {}. If it is a leftover from an earlier run, remove it and retry.",
+                    tmp_path.display()
+                );
+                assert_eq!(err.to_string(), expected_msg);
+            } else {
+                assert_eq!(io_err.raw_os_error(), scratch_raw);
+                assert_eq!(err.to_string(), format!("I/O error: {}", scratch_err));
+            }
+        }
+        other => panic!("expected Io({:?}), got {other:?}", scratch_kind),
+    }
+
+    assert!(tmp_path.is_dir());
+    assert_eq!(read_file_content(&marker_file), marker_bytes);
+    assert!(!bundle_dir.join("part-0000.chk").exists());
+    assert_eq!(progress_count, 0);
+}

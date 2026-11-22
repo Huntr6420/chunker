@@ -340,8 +340,28 @@ where
                 let final_chunk_path = bundle_dir.join(&chunk_filename);
                 let tmp_chunk_path = make_tmp_path(&final_chunk_path);
 
-                chunk_guard.reset(tmp_chunk_path.clone());
-                chunk_writer = Some(File::create(&tmp_chunk_path)?);
+                let file = match std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&tmp_chunk_path)
+                {
+                    Ok(file) => {
+                        chunk_guard.reset(tmp_chunk_path.clone());
+                        file
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                        return Err(ChunkerError::Io(std::io::Error::new(
+                            std::io::ErrorKind::AlreadyExists,
+                            format!(
+                                "Temporary file already exists: {}. If it is a leftover from an earlier run, remove it and retry.",
+                                tmp_chunk_path.display()
+                            ),
+                        )));
+                    }
+                    Err(e) => return Err(ChunkerError::Io(e)),
+                };
+
+                chunk_writer = Some(file);
                 chunk_hasher.reset();
                 current_chunk_written = 0;
             }

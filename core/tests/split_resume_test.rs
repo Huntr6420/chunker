@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use chunker_core::error::ChunkerError;
 use chunker_core::manifest::{load_manifest, validate_manifest};
+use chunker_core::progress::ProgressEvent;
 use chunker_core::split::split_with_reader_unstable;
 use common::CancellingOnNthReadReader;
 
@@ -846,4 +847,74 @@ fn test_resume_source_ends_early_inside_chunk() {
         }
         other => panic!("expected UnexpectedEof, got {other:?}"),
     }
+}
+
+fn read_file_content(path: &std::path::Path) -> Vec<u8> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).unwrap();
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).unwrap();
+    buf
+}
+
+#[test]
+fn test_resume_chunk_temp_occupied_after_cleanup() {
+    let temp = common::make_temp_dir();
+    let chunk_size = 50u64;
+    let buffer_size = 50usize;
+    let total_bytes = 100u64; // 2 chunks
+    let data = common::seeded_bytes(201, total_bytes as usize);
+
+    let bundle_dir = initial_split("occupied.bin", &data, chunk_size, buffer_size, temp.path());
+
+    // Delete chunk 1 so chunk 0 is reusable, and chunk 1 is missing
+    std::fs::remove_file(bundle_dir.join("part-0001.chk")).unwrap();
+
+    let tmp_chunk_path = bundle_dir.join("part-0001.chk.tmp");
+    let occupied_bytes = b"pre-existing occupied chunk tmp content that must survive".to_vec();
+
+    let mut progress_events = Vec::new();
+    let tmp_path_for_cb = tmp_chunk_path.clone();
+    let occupied_bytes_for_cb = occupied_bytes.clone();
+
+    let mut reader = Cursor::new(data);
+    let res = split_with_reader_unstable(
+        &mut reader,
+        "occupied.bin",
+        total_bytes,
+        chunk_size,
+        buffer_size,
+        temp.path(),
+        None,
+        |event: ProgressEvent| {
+            if event.current_chunk == 0 {
+                // Reusable chunk 0 progress event in resume pass.
+                // Startup cleanup has already completed.
+                // Create the occupied tmp file at part-0001.chk.tmp now.
+                std::fs::write(&tmp_path_for_cb, &occupied_bytes_for_cb).unwrap();
+            }
+            progress_events.push(event);
+        },
+    );
+
+    match res {
+        Err(ref err @ ChunkerError::Io(ref io_err)) => {
+            assert_eq!(io_err.kind(), std::io::ErrorKind::AlreadyExists);
+            let expected_msg = format!(
+                "I/O error: Temporary file already exists: {}. If it is a leftover from an earlier run, remove it and retry.",
+                tmp_chunk_path.display()
+            );
+            assert_eq!(err.to_string(), expected_msg);
+        }
+        other => panic!("expected Io(AlreadyExists), got {other:?}"),
+    }
+
+    assert!(tmp_chunk_path.is_file());
+    assert_eq!(read_file_content(&tmp_chunk_path), occupied_bytes);
+    assert!(!bundle_dir.join("part-0001.chk").exists());
+
+    // Exactly 1 progress event from the resume pass (chunk 0), zero write-phase progress events
+    assert_eq!(progress_events.len(), 1);
+    assert_eq!(progress_events[0].current_chunk, 0);
+    assert_eq!(progress_events[0].bytes_processed, chunk_size);
 }

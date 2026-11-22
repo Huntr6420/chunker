@@ -609,27 +609,52 @@ fn test_resolve_bundle_and_manifest_directory_named_manifest_json() {
     );
 }
 
+fn read_file_content(path: &std::path::Path) -> Vec<u8> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).unwrap();
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).unwrap();
+    buf
+}
+
 #[test]
-fn test_characterization_stale_tmp_with_junk_is_overwritten() {
+fn test_manifest_save_refuses_occupied_tmp() {
     let dir = tempdir().unwrap();
     let bundle_dir = dir.path().join("bundle.chunks");
     std::fs::create_dir_all(&bundle_dir).unwrap();
 
+    let manifest1 = create_valid_manifest();
+    let manifest_path =
+        save_manifest_atomic(&bundle_dir, &manifest1).expect("initial save should succeed");
+    let initial_manifest_bytes = read_file_content(&manifest_path);
+
     let tmp_path = bundle_dir.join("manifest.json.tmp");
-    std::fs::write(&tmp_path, b"stale junk bytes from interrupted run").unwrap();
-    assert!(tmp_path.exists());
+    let occupied_bytes = b"pre-existing occupied manifest tmp content".to_vec();
+    std::fs::write(&tmp_path, &occupied_bytes).unwrap();
+    assert!(tmp_path.is_file());
 
-    let valid_manifest = create_valid_manifest();
-    let res = save_manifest_atomic(&bundle_dir, &valid_manifest);
-    assert!(res.is_ok());
+    // Attempt to save a DIFFERENT valid manifest
+    let mut manifest2 = manifest1.clone();
+    manifest2.original_file.name = "different_name.iso".to_string();
 
-    assert!(
-        !tmp_path.exists(),
-        "manifest.json.tmp must not exist after successful save"
-    );
+    let res = save_manifest_atomic(&bundle_dir, &manifest2);
 
-    let loaded = load_manifest(&bundle_dir).unwrap();
-    assert_eq!(loaded, valid_manifest);
+    match res {
+        Err(ref err @ ChunkerError::Io(ref io_err)) => {
+            assert_eq!(io_err.kind(), std::io::ErrorKind::AlreadyExists);
+            let expected_msg = format!(
+                "I/O error: Temporary file already exists: {}. If it is a leftover from an earlier run, remove it and retry.",
+                tmp_path.display()
+            );
+            assert_eq!(err.to_string(), expected_msg);
+        }
+        other => panic!("expected Io(AlreadyExists), got {other:?}"),
+    }
+
+    assert!(manifest_path.is_file());
+    assert_eq!(read_file_content(&manifest_path), initial_manifest_bytes);
+    assert!(tmp_path.is_file());
+    assert_eq!(read_file_content(&tmp_path), occupied_bytes);
 }
 
 #[test]

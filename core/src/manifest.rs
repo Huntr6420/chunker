@@ -189,11 +189,30 @@ pub fn save_manifest_atomic(
     let tmp_path = make_tmp_path(&manifest_path);
 
     // Guard declared FIRST
-    let mut guard = TmpFileGuard::new(tmp_path.clone());
+    let mut guard = TmpFileGuard::empty();
 
     // Write through BufWriter, sync underlying file, and drop handle before rename
     {
-        let file = std::fs::File::create(&tmp_path)?;
+        let file = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+        {
+            Ok(file) => {
+                guard.reset(tmp_path.clone());
+                file
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(ChunkerError::Io(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!(
+                        "Temporary file already exists: {}. If it is a leftover from an earlier run, remove it and retry.",
+                        tmp_path.display()
+                    ),
+                )));
+            }
+            Err(e) => return Err(ChunkerError::Io(e)),
+        };
         let mut writer = std::io::BufWriter::new(file);
         serde_json::to_writer_pretty(&mut writer, manifest).map_err(map_serde_error)?;
         writer.flush()?;
