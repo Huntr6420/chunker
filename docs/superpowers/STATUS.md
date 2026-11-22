@@ -169,18 +169,21 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
   `create_new(true)` and arm cleanup only after a successful open.
 - Codex independently passed formatting check, Clippy, and all 199 workspace
   tests on Windows. All six mutation replays failed at the intended
-  assertions, and the restored source hashes matched. The captured builder
-  log is archived at `D:\backup\tmp-hardening.log`. Its SHA-256 matches the
-  original. The scan found the same 12 pre-existing hits as the baseline.
-- T2 covers a directory occupying a chunk temp path. On Windows it passed
-  before the fix because both versions refused the open. It checks the
-  platform's error and preserves the directory and marker. T1 and T3
-  distinguish the old truncating behavior.
-- Keep the small file-reading helpers local to their tests and retain the
-  repeated refusal message in the three writers for this follow-up. Shared
-  helpers can be considered in a later cleanup.
-- Linux/macOS behavior, read-only occupied entries, and real concurrent
-  creation of a temp entry remain unverified.
+  assertions, and the restored source hashes matched. The evidence record
+  for this hardening task is the captured log at `D:\backup\tmp-hardening.log`.
+  Its SHA-256 matches the original. The scan found the same 12 pre-existing
+  hits as the baseline.
+- T2 checks the platform's error and preservation of the directory and its
+  marker. On Windows both opens returned `PermissionDenied`, so T2 also
+  passed before the fix. The six mutation runs use T1 and T3. The directory
+  open result may differ on Linux.
+- `read_file_content` is duplicated in three test files. A later cleanup
+  could move it to `core/tests/common/mod.rs`. The occupied-temp refusal
+  message is also duplicated in merge, split, and manifest save. A shared
+  helper for that message remains a later idea.
+- Linux/macOS, a read-only occupied temp file, and a temp file appearing
+  after split startup cleanup outside the controlled T1 fixture remain
+  unverified.
 
 ## Known limits for the README (Task 9)
 
