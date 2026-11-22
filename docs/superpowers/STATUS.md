@@ -6,7 +6,7 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 
 ## Last updated
 
-2026-11-22. Task 8 CLI planning decisions are settled. The next step is one builder prompt for owner review.
+2026-11-22. Task 8 CLI is complete at code commit `e3628b2`.
 
 ## Current state
 
@@ -24,10 +24,11 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 - The agreed test and mutation conventions were added to `AGENTS.md` in
   `8d7ab45`.
 - Task 7 (merge) is committed at `ef75cdb`. The hard-link data-loss finding is closed.
-- At Task 8 kickoff, local and live remote `main` and the verified full-history
-  backup `D:\backup\chunker.bundle` all pointed to `0120473` (Task 7 status).
-- Task 8 implementation has not started. Claude drafts the prompt, Codex reviews
-  it, and the owner approves it before Antigravity builds on `task-8`.
+- Task 8 (CLI) is committed at `e3628b2` after the Windows review.
+- At the last transfer check, GitHub and `D:\backup\chunker.bundle` both had
+  `main` at `0120473` (Task 7 status). Task 8 is available in this local
+  checkout. To transfer it via a folder copy, include the hidden `.git` folder.
+  Cargo can rebuild the generated `target` folder.
 
 ## Decisions to remember
 
@@ -127,11 +128,31 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
   Derive the path from the fixture, require exit 0 and empty stderr both times,
   and use `File::open` plus `read_to_end` to check the restored chunk is exactly
   `[0xA5]`. A zero-byte split also prints only the first line.
-- Evidence so far is from core tests and Windows probes, including clap 4.6.7
-  and a public split probe that reused 0, then 1, then 2 chunks. Actual CLI
-  wiring, OS signal delivery, handler installation failure and Linux execution
-  remain unverified. The three merge/verify surplus-counter overflow sites
-  return `InvalidArgument` and have no end-to-end fixture.
+
+## Task 8 review and next steps
+
+- The follow-ups closed the review findings. The Ctrl+C test observes the
+  cancellation token during the first notice write, pre-cancelled verify
+  returns before path validation, and cancellation reporting writes zero
+  diagnostic bytes. Real-binary tests check full application diagnostics.
+  Progress initialization uses `get_or_insert_with`, and successful split,
+  merge, and verify all use the private exit-code mapper through `report_result`.
+- Codex independently ran the restored Windows gate in a scratch copy. All 197
+  workspace tests passed (171 core, 17 CLI unit, 9 CLI integration). The
+  forbidden-pattern scan was clean. Codex replayed row 1 with a fresh build
+  directory. The real-binary zero-byte split test received exit 1 instead of 0
+  when the mapper was mutated. The restored hash matched the reviewed source.
+- Use the captured `%TEMP%\task8-followup.log` and `%TEMP%\task8-followup2.log`
+  as the Task 8 project record. The pasted report blocks contain incorrect
+  test names. Both log files were present at review. Archive copies outside
+  the repository, for example in `D:\backup`, for long-term access.
+- Carry these five verification gaps into Task 11 CI and final review work.
+  Linux/macOS execution, real signal delivery, real handler-install failure,
+  a real closed stdout, and bundle preservation after a stdout failure.
+  The three core surplus-counter overflow sites also lack fixtures.
+
+1. Review split and manifest temp-file hardening as a separate task.
+2. Start the Task 9 README after that review and follow-up are complete.
 
 ## Known limits for the README (Task 9)
 
@@ -160,6 +181,9 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 - Review temp-file creation in split and manifest save after Task 8 and before
   the Task 9 README, as a separate task. Both
   still call `File::create`, which truncates an existing file at the temp path.
+- Remove the misplaced cancellation comment from the general diagnostic write
+  in `cli/src/main.rs` (`report_result`) during a later cleanup. It can be
+  bundled into the temp-file follow-up if that prompt explicitly includes it.
 - `clean_orphan_chunks` accepts names like `part-1.chk`. Consider enforcing canonical names while preserving indexes above 9999.
 - Consider using `rfind` in `extract_filename`.
 - The chunk name format `part-{:04}.chk` appears in several places. Consider
