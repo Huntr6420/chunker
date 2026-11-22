@@ -127,6 +127,11 @@ fn test_cli_merge_round_trip_and_modes() {
         .unwrap();
     assert_eq!(split_res.status.code(), Some(0));
     let bundle_path = split_out_dir.join("test_input.bin.chunks");
+    assert_eq!(
+        String::from_utf8_lossy(&split_res.stdout),
+        format!("Created bundle: {}\n", bundle_path.display())
+    );
+    assert!(split_res.stderr.is_empty());
 
     // Case 1: Default merge (no flags), destination is absent before merge
     let default_dest = split_out_dir.join("test_input.bin");
@@ -225,6 +230,11 @@ fn test_cli_verify_success_and_corruption() {
         .unwrap();
     assert_eq!(split_res.status.code(), Some(0));
     let bundle_path = temp.path().join("verify_input.bin.chunks");
+    assert_eq!(
+        String::from_utf8_lossy(&split_res.stdout),
+        format!("Created bundle: {}\n", bundle_path.display())
+    );
+    assert!(split_res.stderr.is_empty());
 
     // Verify success
     let verify1 = chunker_bin()

@@ -33,7 +33,7 @@ pub fn report_result<E: Write>(stderr: &mut E, result: &Result<(), ChunkerError>
     if let Err(err) = result {
         if !matches!(err, ChunkerError::Cancelled) {
             let _ = writeln!(stderr, "error: {err}");
-            // Cancellation must still work if stderr is closed.
+            // If stderr is closed, there is nowhere left to report this.
         }
     }
     exit_code(result)
