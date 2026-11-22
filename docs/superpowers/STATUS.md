@@ -6,7 +6,9 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
 
 ## Last updated
 
-2026-11-22. Task 8 CLI is complete at code commit `e3628b2`.
+2026-11-22. Task 8 CLI is complete. Code commit `e3628b2` is on local `main`
+after a fast-forward merge from `task-8`. The final audit confirmed Task 8's
+approval.
 
 ## Current state
 
@@ -142,10 +144,19 @@ Read AGENTS.md and docs/superpowers/STATUS.md. Then run git log --oneline -5 and
   forbidden-pattern scan was clean. Codex replayed row 1 with a fresh build
   directory. The real-binary zero-byte split test received exit 1 instead of 0
   when the mapper was mutated. The restored hash matched the reviewed source.
-- Use the captured `%TEMP%\task8-followup.log` and `%TEMP%\task8-followup2.log`
-  as the Task 8 project record. The pasted report blocks contain incorrect
-  test names. Both log files were present at review. Archive copies outside
-  the repository, for example in `D:\backup`, for long-term access.
+- After the merge, Codex reran all 26 CLI tests on Windows (17 unit, 9
+  integration). The audit confirmed the exact §4.8 notices, per-test signal
+  state, and production stderr terminal detection. The code commit contains
+  exactly five CLI files. The Cargo manifests, lockfile, and `core/` match the
+  Task 8 baseline.
+- Two fixture setup splits, in the merge and verify integration tests, assert
+  exit 0 only. Their stdout and stderr checks remain optional test cleanup.
+  Live rendering in an interactive terminal remains unverified. Unit tests
+  cover terminal gating, zero totals, and progress clamping.
+- The Task 8 evidence record is archived at `D:\backup\task8-followup.log`
+  and `D:\backup\task8-followup2.log`. Both copies match the SHA-256 hashes
+  of the original captured logs in `%TEMP%`. The pasted report blocks contain
+  incorrect test names.
 - Carry these five verification gaps into Task 11 CI and final review work.
   Linux/macOS execution, real signal delivery, real handler-install failure,
   a real closed stdout, and bundle preservation after a stdout failure.
